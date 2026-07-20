@@ -11,7 +11,8 @@ import streamlit as st
 import xarray as xr
 
 from src.charting import centroid_temporal_chart, profile_chart, temporal_chart
-from src.daily_diagnosis import available_dates, diagnose_date, load_climatology
+from src.daily_climatology import select_climatology
+from src.daily_diagnosis import available_dates, diagnose_date
 from src.data_loader import load_active_sst_dataset
 from src.plotting import plot_centroid_trajectory, plot_spatial_field
 from src.temporal_metrics import build_metrics_table
@@ -23,7 +24,7 @@ configure_logging(config["logging"]["level"])
 
 
 @st.cache_data(show_spinner="Loading cached SST…", max_entries=2)
-def load_operational_data() -> tuple[xr.Dataset, str, xr.Dataset | None]:
+def load_operational_data() -> tuple[xr.Dataset, str, xr.Dataset | None, str | None, str | None]:
     data = config["data"]
     region = config["region"]
     dataset, mode = load_active_sst_dataset(
@@ -37,12 +38,21 @@ def load_operational_data() -> tuple[xr.Dataset, str, xr.Dataset | None]:
             "seed": data["demo_seed"],
         },
     )
-    climatology_path = resolve_project_path(data["climatology_path"])
-    climatology = load_climatology(str(climatology_path)) if climatology_path.exists() else None
-    return dataset, mode, climatology
+    method_config = config["climatology"]
+    selection = select_climatology(
+        resolve_project_path(method_config["daily_path"]),
+        resolve_project_path(method_config["monthly_path"]),
+        primary_method=method_config["primary_method"],
+        fallback_method=method_config["fallback_method"],
+        allow_monthly_fallback=method_config["allow_monthly_fallback"],
+        data_mode=mode,
+    )
+    if selection.dataset is not None:
+        selection.dataset.attrs["climatology_fallback_used"] = selection.fallback_used
+    return dataset, mode, selection.dataset, selection.method, selection.warning
 
 
-dataset, data_mode, climatology = load_operational_data()
+dataset, data_mode, climatology, climatology_method, climatology_warning = load_operational_data()
 dates = available_dates(dataset)
 
 with st.sidebar:
@@ -54,6 +64,7 @@ with st.sidebar:
         "Persistence window", [7, 15, 30], default=7, format_func=lambda value: f"{value} days"
     )
     st.caption(f"Active mode: {data_mode}")
+    st.caption(f"Climatology: {climatology_method or 'Unavailable'}")
 
 fields, diagnosis = diagnose_date(
     dataset,
@@ -78,6 +89,13 @@ st.title("Humboldt Ocean Watch")
 st.caption("Experimental daily thermal monitoring for the Niño 1+2 region")
 if diagnosis["warning"]:
     st.warning(diagnosis["warning"], icon=":material/warning:")
+if climatology_warning:
+    st.warning(climatology_warning, icon=":material/info:")
+st.caption(
+    "Daily smoothed climatology 1991–2020"
+    if climatology_method == "daily_smoothed"
+    else f"Climatology status: {climatology_method or 'unavailable'}"
+)
 
 tabs = st.tabs(
     ["Overview", "Maps", "Time series", "Spatial behaviour", "Data and methods", "Export"]
@@ -131,7 +149,7 @@ with tabs[1]:
                         vmin=vmin,
                         vmax=vmax,
                     )
-                    st.pyplot(fig, use_container_width=True)
+                    st.pyplot(fig, width="stretch")
                     plt.close(fig)
 
 with tabs[2]:
@@ -181,7 +199,7 @@ with tabs[3]:
                 vmin=0,
                 vmax=1,
             )
-            st.pyplot(fig, use_container_width=True)
+            st.pyplot(fig, width="stretch")
             plt.close(fig)
         with right.container(border=True):
             st.subheader("Warm-anomaly centroid trajectory")
@@ -224,7 +242,23 @@ with tabs[4]:
         "available_period": f"{dates[0]} to {dates[-1]}",
         "study_region": "90–80°W, 10°S–0°",
         "temperature_units": dataset.sst.attrs.get("units"),
-        "climatology": "1991–2020 monthly OSTIA" if climatology is not None else "Unavailable",
+        "climatology_method": climatology_method or "Unavailable",
+        "climatology_reference_period": (
+            f"{config['climatology']['reference_start']}–{config['climatology']['reference_end']}"
+        ),
+        "daily_sampling_half_window_days": config["climatology"]["sampling_half_window_days"],
+        "daily_smoothing_window_days": config["climatology"]["smoothing_window_days"],
+        "fallback_method": config["climatology"]["fallback_method"],
+        "leap_day_method": (
+            climatology.attrs.get("leap_day_method", "Not applicable to monthly fallback")
+            if climatology is not None else "Unavailable"
+        ),
+        "active_climatology_file": diagnosis.get("climatology_file"),
+        "climatology_fallback_used": diagnosis.get("climatology_fallback_used", False),
+        "percentile_calculation_state": (
+            climatology.attrs.get("percentile_calculation_state", "not applicable")
+            if climatology is not None else "not_calculated"
+        ),
     })
     st.warning("Experimental product. Official ENSO and El Niño Costero classification is not provided.")
     st.caption("Dates are read from the NetCDF time coordinate, never from global time-coverage attributes.")

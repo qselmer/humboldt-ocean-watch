@@ -10,7 +10,6 @@ data:
   live_path: data/live/nino12_sst_nrt.nc
   demo_path: data/demo/synthetic_sst_daily.nc
   input_path: data/demo/synthetic_sst_daily.nc
-  climatology_path: data/climatology/nino12_monthly_climatology_1991_2020.nc
   metrics_path: data/processed/nino12_daily_metrics.parquet
   processed_path: data/processed/daily_snapshot.nc
   sst_aliases:
@@ -30,3 +29,15 @@ outputs:
 
 logging:
   level: INFO
+
+climatology:
+  primary_method: daily_smoothed
+  reference_start: 1991
+  reference_end: 2020
+  sampling_half_window_days: 5
+  smoothing_window_days: 31
+  daily_path: data/climatology/nino12_daily_climatology_1991_2020.nc
+  monthly_path: data/climatology/nino12_monthly_climatology_1991_2020.nc
+  fallback_method: monthly
+  allow_monthly_fallback: true
+  allow_synthetic_fallback_with_real_data: false

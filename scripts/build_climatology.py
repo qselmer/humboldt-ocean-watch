@@ -76,6 +76,7 @@ def build_climatology(start_year: int, end_year: int, output: Path) -> Path:
             maximum_latitude=0.0,
             start_datetime=f"{year}-01-01T00:00:00",
             end_datetime=f"{year}-12-31T23:59:59",
+            chunk_size_limit=-1,
         )
         statistics = yearly_accumulator(source).load()
         source.close()
