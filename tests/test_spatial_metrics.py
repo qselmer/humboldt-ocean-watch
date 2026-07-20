@@ -3,7 +3,11 @@
 import numpy as np
 import xarray as xr
 
-from src.spatial_metrics import area_weighted_mean, percentage_area_above_threshold
+from src.spatial_metrics import (
+    area_weighted_mean,
+    percentage_area_above_threshold,
+    percentage_area_at_or_above_threshold,
+)
 
 
 def test_cosine_latitude_weighted_spatial_mean() -> None:
@@ -44,3 +48,13 @@ def test_percentage_of_valid_ocean_area_above_threshold_ignores_nan() -> None:
     # Above-threshold weight is 0.5; total valid weight is 1 + 0.5 + 0.5 = 2.
     np.testing.assert_allclose(float(percentage), 25.0)
     assert percentage.attrs["units"] == "%"
+
+
+def test_area_weighted_threshold_is_inclusive() -> None:
+    field = xr.DataArray(
+        [[2.0], [1.0]],
+        dims=("latitude", "longitude"),
+        coords={"latitude": [60.0, 0.0], "longitude": [-85.0]},
+    )
+    result = percentage_area_at_or_above_threshold(field, 2.0)
+    np.testing.assert_allclose(float(result), 100.0 / 3.0)

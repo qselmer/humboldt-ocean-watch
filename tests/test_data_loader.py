@@ -4,7 +4,14 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from src.data_loader import find_sst_variable, normalize_sst, subset_nino12
+from src.data_loader import (
+    COPERNICUS_CACHED_MODE,
+    SYNTHETIC_DEMO_MODE,
+    find_sst_variable,
+    load_active_sst_dataset,
+    normalize_sst,
+    subset_nino12,
+)
 
 
 def _temperature_dataset(variable: str, values: list[float], units: str) -> xr.Dataset:
@@ -78,3 +85,39 @@ def test_nino12_subset_handles_both_longitude_conventions(
     np.testing.assert_array_equal(subset.longitude.values, expected)
     assert float(subset.longitude.min()) == -90.0
     assert float(subset.longitude.max()) == -80.0
+
+
+def _daily_sst_dataset() -> xr.Dataset:
+    return xr.Dataset(
+        {"sst": (("time", "latitude", "longitude"), np.ones((2, 2, 2)) * 25)},
+        coords={"time": ["2026-01-01", "2026-01-02"], "latitude": [-10.0, 0.0], "longitude": [-90.0, -80.0]},
+    )
+
+
+def test_live_data_has_priority(tmp_path, monkeypatch) -> None:
+    live = tmp_path / "live.nc"
+    live.touch()
+    calls: list[str] = []
+
+    def fake_load(path, **kwargs):
+        calls.append(str(path))
+        return _daily_sst_dataset()
+
+    monkeypatch.setattr("src.data_loader.load_sst_dataset", fake_load)
+    _, mode = load_active_sst_dataset(live, tmp_path / "demo.nc")
+    assert mode == COPERNICUS_CACHED_MODE
+    assert calls == [str(live)]
+
+
+def test_demo_is_used_when_live_file_is_missing(tmp_path, monkeypatch) -> None:
+    demo = tmp_path / "demo.nc"
+    calls: list[str] = []
+
+    def fake_load(path, **kwargs):
+        calls.append(str(path))
+        return _daily_sst_dataset()
+
+    monkeypatch.setattr("src.data_loader.load_sst_dataset", fake_load)
+    _, mode = load_active_sst_dataset(tmp_path / "missing.nc", demo)
+    assert mode == SYNTHETIC_DEMO_MODE
+    assert calls == [str(demo)]

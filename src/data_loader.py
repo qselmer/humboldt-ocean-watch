@@ -19,6 +19,8 @@ DEFAULT_SST_ALIASES = (
 )
 NINO12_LONGITUDE_BOUNDS = (-90.0, -80.0)
 NINO12_LATITUDE_BOUNDS = (-10.0, 0.0)
+COPERNICUS_CACHED_MODE = "Copernicus cached data"
+SYNTHETIC_DEMO_MODE = "Synthetic demonstration data"
 
 
 def find_sst_variable(
@@ -171,3 +173,31 @@ def load_sst_dataset(
     validate_dataset(normalized)
     normalized.attrs["source_path"] = str(source)
     return normalized
+
+
+def load_active_sst_dataset(
+    live_path: str | Path,
+    demo_path: str | Path,
+    *,
+    aliases: Sequence[str] = DEFAULT_SST_ALIASES,
+    demo_options: dict[str, Any] | None = None,
+) -> tuple[xr.Dataset, str]:
+    """Load cached Copernicus SST first, falling back to synthetic demo SST."""
+    live_source = Path(live_path)
+    if live_source.exists():
+        dataset = load_sst_dataset(
+            live_source, aliases=aliases, create_demo_if_missing=False
+        )
+        mode = COPERNICUS_CACHED_MODE
+    else:
+        dataset = load_sst_dataset(
+            demo_path,
+            aliases=aliases,
+            create_demo_if_missing=True,
+            demo_options=demo_options,
+        )
+        mode = SYNTHETIC_DEMO_MODE
+    dataset = subset_nino12(dataset)
+    assert isinstance(dataset, xr.Dataset)
+    dataset.attrs.update(data_mode=mode)
+    return dataset.sortby("time"), mode

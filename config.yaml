@@ -7,7 +7,11 @@ region:
   latitude: [-10.0, 0.0]
 
 data:
+  live_path: data/live/nino12_sst_nrt.nc
+  demo_path: data/demo/synthetic_sst_daily.nc
   input_path: data/demo/synthetic_sst_daily.nc
+  climatology_path: data/climatology/nino12_monthly_climatology_1991_2020.nc
+  metrics_path: data/processed/nino12_daily_metrics.parquet
   processed_path: data/processed/daily_snapshot.nc
   sst_aliases:
     - analysed_sst
@@ -16,6 +20,13 @@ data:
     - sea_surface_temperature
   demo_days: 10
   demo_seed: 42
+
+outputs:
+  figures:
+    sst_current: outputs/figures/sst_current.png
+    sst_anomaly: outputs/figures/sst_anomaly.png
+    sst_zscore: outputs/figures/sst_zscore.png
+  metrics: outputs/reports/daily_metrics.json
 
 logging:
   level: INFO

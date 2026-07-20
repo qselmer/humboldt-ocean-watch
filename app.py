@@ -1,51 +1,209 @@
-"""Minimal Streamlit interface for Humboldt Ocean Watch."""
+"""Operational cached-data dashboard for Humboldt Ocean Watch."""
 
 from __future__ import annotations
 
-import os
+import json
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
+import xarray as xr
 
-from src.data_loader import load_sst_dataset
+from src.charting import profile_chart, temporal_chart
+from src.daily_diagnosis import available_dates, diagnose_date, load_climatology
+from src.data_loader import load_active_sst_dataset
+from src.plotting import plot_thermal_field
+from src.temporal_metrics import build_metrics_table
 from src.utils import configure_logging, load_config, resolve_project_path
 
-st.set_page_config(page_title="Humboldt Ocean Watch", page_icon="🌊", layout="wide")
+st.set_page_config(page_title="Humboldt Ocean Watch", page_icon=":material/waves:", layout="wide")
 config = load_config()
-configure_logging(os.getenv("HOW_LOG_LEVEL", config["logging"]["level"]))
+configure_logging(config["logging"]["level"])
 
-st.title("Humboldt Ocean Watch")
-st.warning("Experimental thermal monitoring product for the Niño 1+2 region.")
-st.caption(
-    "This application provides descriptive SST monitoring only and does not classify "
-    "the official magnitude of El Niño Costero."
-)
 
-default_path = os.getenv("HOW_SST_PATH", config["data"]["input_path"])
-requested_path = st.text_input("Local SST NetCDF path", value=default_path)
-
-try:
-    source = resolve_project_path(Path(requested_path))
+@st.cache_data(show_spinner="Loading cached SST…", max_entries=2)
+def load_operational_data() -> tuple[xr.Dataset, str, xr.Dataset | None]:
+    data = config["data"]
     region = config["region"]
-    dataset = load_sst_dataset(
-        source,
-        aliases=config["data"]["sst_aliases"],
+    dataset, mode = load_active_sst_dataset(
+        resolve_project_path(data["live_path"]),
+        resolve_project_path(data["demo_path"]),
+        aliases=data["sst_aliases"],
         demo_options={
             "longitude": tuple(region["longitude"]),
             "latitude": tuple(region["latitude"]),
-            "days": config["data"]["demo_days"],
-            "seed": config["data"]["demo_seed"],
+            "days": data["demo_days"],
+            "seed": data["demo_seed"],
         },
     )
-    st.success(f"Dataset ready: {source}")
-    first_date = str(dataset.time.min().dt.strftime("%Y-%m-%d").item())
-    last_date = str(dataset.time.max().dt.strftime("%Y-%m-%d").item())
-    columns = st.columns(4)
-    columns[0].metric("Start date", first_date)
-    columns[1].metric("End date", last_date)
-    columns[2].metric("Dimensions", " × ".join(f"{key}: {value}" for key, value in dataset.sizes.items()))
-    columns[3].metric("Temperature units", dataset["sst"].attrs["units"])
-    st.write("Study region", {"longitude": region["longitude"], "latitude": region["latitude"]})
-except (FileNotFoundError, OSError, ValueError) as exc:
-    st.error(f"Unable to prepare SST dataset: {exc}")
-    st.stop()
+    climatology_path = resolve_project_path(data["climatology_path"])
+    climatology = load_climatology(str(climatology_path)) if climatology_path.exists() else None
+    return dataset, mode, climatology
+
+
+dataset, data_mode, climatology = load_operational_data()
+dates = available_dates(dataset)
+
+with st.sidebar:
+    st.header("Diagnosis controls")
+    analysis_date = st.selectbox("Analysis date", dates, index=len(dates) - 1)
+    period_choice = st.selectbox("Time-series period", [30, 90, 180, "All"], index=1)
+    anomaly_threshold = st.slider("Anomaly threshold (°C)", 0.5, 5.0, 2.0, 0.5)
+    persistence_window = st.segmented_control(
+        "Persistence window", [7, 15, 30], default=7, format_func=lambda value: f"{value} days"
+    )
+    st.caption(f"Active mode: {data_mode}")
+
+fields, diagnosis = diagnose_date(
+    dataset,
+    analysis_date,
+    climatology=climatology,
+    data_mode=data_mode,
+    threshold=anomaly_threshold,
+    persistence_window=int(persistence_window or 7),
+)
+metrics_table = build_metrics_table(dataset, climatology)
+selected_time = pd.Timestamp(analysis_date)
+if period_choice != "All":
+    series = metrics_table[
+        (metrics_table.date >= selected_time - pd.Timedelta(days=int(period_choice) - 1))
+        & (metrics_table.date <= selected_time)
+    ]
+else:
+    series = metrics_table[metrics_table.date <= selected_time]
+metrics = diagnosis["metrics"]
+
+st.title("Humboldt Ocean Watch")
+st.caption("Experimental daily thermal monitoring for the Niño 1+2 region")
+if diagnosis["warning"]:
+    st.warning(diagnosis["warning"], icon=":material/warning:")
+
+tabs = st.tabs(
+    ["Overview", "Maps", "Time series", "Spatial behaviour", "Data and methods", "Export"]
+)
+
+
+def display_value(value: float | None, unit: str, signed: bool = False) -> str:
+    if value is None or pd.isna(value):
+        return "Unavailable"
+    return f"{value:+.2f} {unit}" if signed else f"{value:.2f} {unit}"
+
+
+with tabs[0]:
+    st.subheader(f"Regional overview · {analysis_date}")
+    with st.container(horizontal=True):
+        st.metric("Selected date", analysis_date, border=True)
+        st.metric("Mean SST", display_value(metrics["mean_sst_c"], "°C"), border=True)
+        st.metric("Mean anomaly", display_value(metrics["mean_sst_anomaly_c"], "°C", True), border=True)
+        st.metric("Maximum anomaly", display_value(metrics["maximum_anomaly_c"], "°C", True), border=True)
+    with st.container(horizontal=True):
+        st.metric(
+            f"Area ≥ +{anomaly_threshold:g} °C",
+            display_value(metrics["area_anomaly_ge_threshold_percent"], "%"),
+            border=True,
+        )
+        st.metric("Valid-data coverage", display_value(metrics["valid_data_coverage_percent"], "%"), border=True)
+        st.metric("Active data mode", data_mode, border=True)
+
+with tabs[1]:
+    map_specs = [
+        ("Current SST", "sst_current", "SST (°C)", "turbo", 18.0, 32.0),
+        ("SST anomaly", "sst_anomaly", "Anomaly (°C)", "RdBu_r", -5.0, 5.0),
+        ("Standardized anomaly", "sst_z_score", "Z-score", "RdBu_r", -3.0, 3.0),
+        ("Daily SST change", "sst_daily_change", "Change (°C)", "RdBu_r", -2.0, 2.0),
+        ("Anomaly persistence", "anomaly_persistence", "Persistence (fraction)", "magma", 0.0, 1.0),
+    ]
+    for row_start in range(0, len(map_specs), 2):
+        columns = st.columns(2)
+        for column, spec in zip(columns, map_specs[row_start : row_start + 2], strict=False):
+            title, variable, label, cmap, vmin, vmax = spec
+            with column.container(border=True):
+                if variable not in fields:
+                    st.info(f"{title} requires the real 1991–2020 climatology.")
+                else:
+                    map_field = fields[variable] / 100.0 if variable == "anomaly_persistence" else fields[variable]
+                    st.pyplot(
+                        plot_thermal_field(
+                            map_field, title=title, colorbar_label=label,
+                            cmap=cmap, vmin=vmin, vmax=vmax,
+                        ),
+                        width="stretch",
+                    )
+
+with tabs[2]:
+    st.subheader("Regional time series")
+    sst_chart = temporal_chart(
+        series, x="date", columns=["mean_sst_c", "seven_day_mean_sst_c"],
+        y_title="SST (°C)", title="Mean SST",
+    )
+    if sst_chart is not None:
+        st.altair_chart(sst_chart, width="stretch")
+    if climatology is None:
+        st.info("Anomaly-dependent time series are disabled until the real climatology is built.")
+    else:
+        temporal_specs = [
+            (["mean_sst_anomaly_c", "seven_day_mean_anomaly_c"], "Anomaly (°C)", "Mean anomaly"),
+            (["area_anomaly_ge_1c_percent", "area_anomaly_ge_2c_percent", "area_anomaly_ge_3c_percent"], "Area (%)", "Warm-anomaly area"),
+            (["maximum_anomaly_c", "p90_anomaly_c"], "Anomaly (°C)", "Upper anomaly distribution"),
+            (["warm_centroid_longitude", "warm_centroid_latitude"], "Coordinate (degrees)", "Warm-anomaly centroid"),
+        ]
+        for columns, y_title, title in temporal_specs:
+            chart = temporal_chart(series, x="date", columns=columns, y_title=y_title, title=title)
+            if chart is None:
+                st.info(f"No finite values are available for {title.lower()}.")
+            else:
+                st.altair_chart(chart, width="stretch")
+
+with tabs[3]:
+    if climatology is None:
+        st.info("Spatial anomaly behaviour is disabled until the real climatology is built.")
+    else:
+        left, right = st.columns(2)
+        with left.container(border=True):
+            st.pyplot(plot_thermal_field(fields.anomaly_persistence / 100.0, title="Warm-anomaly persistence", colorbar_label="Persistence (fraction)", cmap="magma", vmin=0, vmax=1), width="stretch")
+        with right.container(border=True):
+            trajectory = series.dropna(subset=["warm_centroid_longitude", "warm_centroid_latitude"])
+            st.subheader("Warm-anomaly centroid trajectory")
+            st.scatter_chart(trajectory, x="warm_centroid_longitude", y="warm_centroid_latitude")
+        profile_left, profile_right = st.columns(2)
+        with profile_left.container(border=True):
+            st.subheader("Latitude anomaly profile")
+            chart = profile_chart(
+                fields.latitude_anomaly_profile,
+                coordinate="latitude",
+                title="Zonal-mean SST anomaly",
+            )
+            if chart is None:
+                st.info("No finite latitude-profile values are available.")
+            else:
+                st.altair_chart(chart, width="stretch")
+        with profile_right.container(border=True):
+            st.subheader("Longitude anomaly profile")
+            chart = profile_chart(
+                fields.longitude_anomaly_profile,
+                coordinate="longitude",
+                title="Meridional-mean SST anomaly",
+            )
+            if chart is None:
+                st.info("No finite longitude-profile values are available.")
+            else:
+                st.altair_chart(chart, width="stretch")
+
+with tabs[4]:
+    st.subheader("Data and methods")
+    st.write({
+        "active_mode": data_mode,
+        "source": dataset.attrs.get("source_path"),
+        "available_period": f"{dates[0]} to {dates[-1]}",
+        "study_region": "90–80°W, 10°S–0°",
+        "temperature_units": dataset.sst.attrs.get("units"),
+        "climatology": "1991–2020 monthly OSTIA" if climatology is not None else "Unavailable",
+    })
+    st.warning("Experimental product. Official ENSO and El Niño Costero classification is not provided.")
+    st.caption("Dates are read from the NetCDF time coordinate, never from global time-coverage attributes.")
+
+with tabs[5]:
+    st.subheader("Export selected diagnosis")
+    st.download_button("Download temporal metrics CSV", series.to_csv(index=False), "nino12_daily_metrics.csv", "text/csv")
+    st.download_button("Download diagnosis NetCDF", bytes(fields.to_netcdf()), f"nino12_diagnosis_{analysis_date}.nc", "application/x-netcdf")
+    st.download_button("Download diagnosis JSON", json.dumps(diagnosis, indent=2), f"nino12_diagnosis_{analysis_date}.json", "application/json")
