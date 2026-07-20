@@ -1,0 +1,21 @@
+project:
+  name: Humboldt Ocean Watch
+  label: Experimental thermal monitoring product
+
+region:
+  longitude: [-90.0, -80.0]
+  latitude: [-10.0, 0.0]
+
+data:
+  input_path: data/demo/synthetic_sst_daily.nc
+  processed_path: data/processed/daily_snapshot.nc
+  sst_aliases:
+    - analysed_sst
+    - sst
+    - thetao
+    - sea_surface_temperature
+  demo_days: 10
+  demo_seed: 42
+
+logging:
+  level: INFO
