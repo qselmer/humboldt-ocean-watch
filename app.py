@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -14,6 +13,7 @@ from src.charting import centroid_temporal_chart, profile_chart, temporal_chart
 from src.daily_climatology import select_climatology
 from src.daily_diagnosis import available_dates, diagnose_date
 from src.data_loader import load_active_sst_dataset
+from src.export_utils import dumps_json_safe
 from src.plotting import plot_centroid_trajectory, plot_spatial_field
 from src.temporal_metrics import build_metrics_table
 from src.utils import configure_logging, load_config, resolve_project_path
@@ -267,4 +267,10 @@ with tabs[5]:
     st.subheader("Export selected diagnosis")
     st.download_button("Download temporal metrics CSV", series.to_csv(index=False), "nino12_daily_metrics.csv", "text/csv")
     st.download_button("Download diagnosis NetCDF", bytes(fields.to_netcdf()), f"nino12_diagnosis_{analysis_date}.nc", "application/x-netcdf")
-    st.download_button("Download diagnosis JSON", json.dumps(diagnosis, indent=2), f"nino12_diagnosis_{analysis_date}.json", "application/json")
+    diagnosis_json = dumps_json_safe(diagnosis)
+    st.download_button(
+        label="Download diagnosis JSON",
+        data=diagnosis_json,
+        file_name=f"nino12_diagnosis_{analysis_date}.json",
+        mime="application/json",
+    )
