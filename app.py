@@ -10,10 +10,10 @@ import pandas as pd
 import streamlit as st
 import xarray as xr
 
-from src.charting import profile_chart, temporal_chart
+from src.charting import centroid_temporal_chart, profile_chart, temporal_chart
 from src.daily_diagnosis import available_dates, diagnose_date, load_climatology
 from src.data_loader import load_active_sst_dataset
-from src.plotting import plot_spatial_field
+from src.plotting import plot_centroid_trajectory, plot_spatial_field
 from src.temporal_metrics import build_metrics_table
 from src.utils import configure_logging, load_config, resolve_project_path
 
@@ -149,7 +149,6 @@ with tabs[2]:
             (["mean_sst_anomaly_c", "seven_day_mean_anomaly_c"], "Anomaly (°C)", "Mean anomaly"),
             (["area_anomaly_ge_1c_percent", "area_anomaly_ge_2c_percent", "area_anomaly_ge_3c_percent"], "Area (%)", "Warm-anomaly area"),
             (["maximum_anomaly_c", "p90_anomaly_c"], "Anomaly (°C)", "Upper anomaly distribution"),
-            (["warm_centroid_longitude", "warm_centroid_latitude"], "Coordinate (degrees)", "Warm-anomaly centroid"),
         ]
         for columns, y_title, title in temporal_specs:
             chart = temporal_chart(series, x="date", columns=columns, y_title=y_title, title=title)
@@ -157,6 +156,16 @@ with tabs[2]:
                 st.info(f"No finite values are available for {title.lower()}.")
             else:
                 st.altair_chart(chart, width="stretch")
+        centroid_columns = st.columns(2)
+        for column, coordinate in zip(centroid_columns, ("latitude", "longitude"), strict=True):
+            with column.container(border=True):
+                chart = centroid_temporal_chart(
+                    series, coordinate=coordinate, selected_date=analysis_date
+                )
+                if chart is None:
+                    st.info(f"No finite centroid {coordinate} values are available.")
+                else:
+                    st.altair_chart(chart, width="stretch")
 
 with tabs[3]:
     if climatology is None:
@@ -175,9 +184,14 @@ with tabs[3]:
             st.pyplot(fig, use_container_width=True)
             plt.close(fig)
         with right.container(border=True):
-            trajectory = series.dropna(subset=["warm_centroid_longitude", "warm_centroid_latitude"])
             st.subheader("Warm-anomaly centroid trajectory")
-            st.scatter_chart(trajectory, x="warm_centroid_longitude", y="warm_centroid_latitude")
+            try:
+                fig = plot_centroid_trajectory(series, analysis_date)
+            except ValueError as exc:
+                st.info(str(exc))
+            else:
+                st.pyplot(fig, width="stretch")
+                plt.close(fig)
         profile_left, profile_right = st.columns(2)
         with profile_left.container(border=True):
             st.subheader("Latitude anomaly profile")

@@ -51,6 +51,22 @@ def test_cartopy_failure_falls_back_to_matplotlib(monkeypatch) -> None:
     plt.close(figure)
 
 
+def test_admin1_feature_failure_falls_back_to_matplotlib(monkeypatch) -> None:
+    if plotting.ccrs is None or plotting.cfeature is None:
+        pytest.skip("Cartopy is not installed")
+    monkeypatch.setattr(
+        plotting.cfeature,
+        "NaturalEarthFeature",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("admin-1 unavailable")),
+    )
+    figure = plotting.plot_spatial_field(
+        field(), title="Admin fallback", colorbar_label="Value", cmap="turbo", vmin=0, vmax=5
+    )
+    assert isinstance(figure, matplotlib.figure.Figure)
+    np.testing.assert_allclose(figure.axes[0].get_xlim(), [-90.0, -80.0])
+    plt.close(figure)
+
+
 def test_fixed_nino12_extent_and_white_background() -> None:
     figure = plotting.plot_spatial_field(field(), title="Extent", colorbar_label="Value", cmap="turbo", vmin=0, vmax=5)
     axis = figure.axes[0]

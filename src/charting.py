@@ -118,3 +118,52 @@ def temporal_chart(
         .properties(height=320)
         .interactive()
     )
+
+
+def centroid_temporal_chart(
+    data: pd.DataFrame,
+    *,
+    coordinate: str,
+    selected_date: str,
+) -> alt.LayerChart | None:
+    """Create one centroid-coordinate series with gaps and a selected-date rule."""
+    column = f"warm_centroid_{coordinate}"
+    if coordinate not in {"latitude", "longitude"}:
+        raise ValueError("Centroid coordinate must be 'latitude' or 'longitude'")
+    if "date" not in data.columns or column not in data.columns:
+        return None
+    frame = data[["date", column]].copy()
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    frame[column] = pd.to_numeric(frame[column], errors="coerce").replace(
+        [np.inf, -np.inf], np.nan
+    )
+    frame = frame[frame.date.notna()].copy()
+    y_domain = finite_numeric_domain(frame[column], padding_fraction=0.05)
+    if frame.empty or y_domain is None:
+        return None
+    date_min, date_max = frame.date.min(), frame.date.max()
+    if date_min == date_max:
+        date_min -= pd.Timedelta(hours=12)
+        date_max += pd.Timedelta(hours=12)
+    label = coordinate.capitalize()
+    line = (
+        alt.Chart(frame)
+        .mark_line(point=True, invalid="break-paths-show-domains")
+        .encode(
+            x=alt.X("date:T", title="Date", scale=alt.Scale(domain=[date_min, date_max])),
+            y=alt.Y(
+                f"{column}:Q",
+                title=f"Centroid {coordinate} (degrees)",
+                scale=alt.Scale(domain=list(y_domain), zero=False),
+            ),
+            tooltip=[
+                alt.Tooltip("date:T", title="Date"),
+                alt.Tooltip(f"{column}:Q", title=f"{label} (°)", format=".3f"),
+            ],
+        )
+    )
+    rule_data = pd.DataFrame({"selected_date": [pd.Timestamp(selected_date)]})
+    rule = alt.Chart(rule_data).mark_rule(color="#d62728", strokeDash=[5, 4]).encode(
+        x=alt.X("selected_date:T")
+    )
+    return (line + rule).properties(title=f"Centroid {coordinate} through time", height=280).interactive()

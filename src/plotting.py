@@ -12,7 +12,9 @@ matplotlib.use("Agg")
 import matplotlib.figure
 import matplotlib.pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
+from matplotlib.patches import FancyArrowPatch
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 try:
@@ -26,6 +28,80 @@ LOGGER = logging.getLogger(__name__)
 NINO12_EXTENT = (-90.0, -80.0, -10.0, 0.0)
 LATITUDE_ALIASES = ("latitude", "lat")
 LONGITUDE_ALIASES = ("longitude", "lon")
+
+
+def _trajectory_limits(values: np.ndarray) -> tuple[float, float]:
+    lower = float(np.min(values))
+    upper = float(np.max(values))
+    padding = max((upper - lower) * 0.08, 0.10)
+    return lower - padding, upper + padding
+
+
+def plot_centroid_trajectory(
+    metrics_df: pd.DataFrame,
+    selected_date: str,
+    maximum_arrows: int = 25,
+) -> matplotlib.figure.Figure:
+    """Plot the warm-anomaly centroid path for the supplied active time window."""
+    required = {"date", "warm_centroid_longitude", "warm_centroid_latitude"}
+    missing = required - set(metrics_df.columns)
+    if missing:
+        raise ValueError(f"Centroid trajectory data is missing columns: {sorted(missing)}")
+    if maximum_arrows < 0:
+        raise ValueError("maximum_arrows must be non-negative")
+    trajectory = metrics_df[list(required)].copy()
+    trajectory["date"] = pd.to_datetime(trajectory["date"], errors="coerce")
+    for coordinate in ("warm_centroid_longitude", "warm_centroid_latitude"):
+        trajectory[coordinate] = pd.to_numeric(trajectory[coordinate], errors="coerce")
+    finite = (
+        trajectory.date.notna()
+        & np.isfinite(trajectory.warm_centroid_longitude)
+        & np.isfinite(trajectory.warm_centroid_latitude)
+    )
+    trajectory = trajectory.loc[finite].sort_values("date").reset_index(drop=True)
+    if trajectory.empty:
+        raise ValueError("No finite centroid coordinates are available in the active window")
+
+    longitude = trajectory.warm_centroid_longitude.to_numpy(dtype=float)
+    latitude = trajectory.warm_centroid_latitude.to_numpy(dtype=float)
+    figure, axis = plt.subplots(figsize=(7.2, 5.2), constrained_layout=True, facecolor="white")
+    axis.set_facecolor("white")
+    axis.plot(longitude, latitude, color="0.35", linewidth=1.4, zorder=1)
+    segment_count = max(len(trajectory) - 1, 0)
+    arrow_count = min(maximum_arrows, segment_count)
+    if arrow_count:
+        indices = np.unique(np.linspace(0, segment_count - 1, arrow_count, dtype=int))
+        for index in indices:
+            arrow = FancyArrowPatch(
+                (longitude[index], latitude[index]),
+                (longitude[index + 1], latitude[index + 1]),
+                arrowstyle="-|>", mutation_scale=9, color="0.25", linewidth=0.9, zorder=2,
+            )
+            axis.add_patch(arrow)
+
+    points = {
+        "Start": (0, "#2ca02c", "o"),
+        "End": (len(trajectory) - 1, "#d62728", "s"),
+    }
+    selected = pd.Timestamp(selected_date)
+    selected_matches = trajectory.index[trajectory.date == selected].tolist()
+    if selected_matches:
+        points["Selected"] = (selected_matches[-1], "#ffbf00", "*")
+    for label, (index, color, marker) in points.items():
+        axis.scatter(longitude[index], latitude[index], s=75, color=color, marker=marker, edgecolor="black", linewidth=0.6, label=label, zorder=4)
+        axis.annotate(
+            f"{label}: {trajectory.date.iloc[index]:%Y-%m-%d}",
+            (longitude[index], latitude[index]), xytext=(5, 6), textcoords="offset points",
+            fontsize=8, color="black",
+        )
+    axis.set_xlim(*_trajectory_limits(longitude))
+    axis.set_ylim(*_trajectory_limits(latitude))
+    axis.set_xlabel("Centroid longitude (°E)")
+    axis.set_ylabel("Centroid latitude (°N)")
+    axis.set_title("Warm-anomaly centroid trajectory")
+    axis.grid(color="0.85", linewidth=0.5)
+    axis.legend(loc="best")
+    return figure
 
 
 def _coordinate_name(field: xr.DataArray, aliases: tuple[str, ...], kind: str) -> str:
@@ -139,8 +215,15 @@ def _plot_with_cartopy(
     )
     axis.set_extent(list(NINO12_EXTENT), crs=ccrs.PlateCarree())
     axis.add_feature(cfeature.LAND, facecolor="white", edgecolor="black", linewidth=0.6, zorder=5)
-    axis.coastlines(resolution="50m", color="black", linewidth=0.9, zorder=6)
-    axis.add_feature(cfeature.BORDERS, edgecolor="0.35", linewidth=0.5, zorder=6)
+    axis.coastlines(resolution="50m", color="black", linewidth=1.6, zorder=6)
+    axis.add_feature(cfeature.BORDERS, edgecolor="black", linewidth=0.9, zorder=6)
+    admin_1 = cfeature.NaturalEarthFeature(
+        category="cultural",
+        name="admin_1_states_provinces_lines",
+        scale="10m",
+        facecolor="none",
+    )
+    axis.add_feature(admin_1, edgecolor="black", linewidth=0.55, zorder=6)
     grid = axis.gridlines(draw_labels=True, color="0.75", alpha=0.7, linewidth=0.5)
     grid.top_labels = False
     grid.right_labels = False
