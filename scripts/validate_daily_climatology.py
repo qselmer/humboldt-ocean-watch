@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -15,6 +14,7 @@ import xarray as xr
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.daily_climatology import DAILY_VARIABLES, validate_daily_climatology
+from src.export_utils import dumps_json_safe
 from src.spatial_metrics import area_weighted_mean
 from src.utils import resolve_project_path
 
@@ -107,10 +107,10 @@ def main(argv: list[str] | None = None) -> int:
     report, dataset = validate_file(args.input)
     report_path = resolve_project_path(REPORT_PATH)
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    report_path.write_text(dumps_json_safe(report), encoding="utf-8")
     if dataset is not None and report["valid"]:
         create_continuity_figure(dataset, resolve_project_path(FIGURE_PATH))
-    print(json.dumps(report, indent=2))
+    print(dumps_json_safe(report))
     return 0 if report["valid"] else 1
 
 

@@ -41,3 +41,20 @@ climatology:
   fallback_method: monthly
   allow_monthly_fallback: true
   allow_synthetic_fallback_with_real_data: false
+
+quality_control:
+  expected_frequency: "1D"
+  duplicate_policy: "error"
+  minimum_valid_coverage: 0.80
+  minimum_temporal_observations: 10
+  maximum_gap_days: 2
+  allow_irregular_intervals: true
+  fail_on_unknown_units: true
+
+series_bank:
+  variables:
+    - sst
+    - anomaly
+    - zscore
+  warm_anomaly_threshold_c: 2.0
+  output: outputs/analytics/daily_series_bank.parquet

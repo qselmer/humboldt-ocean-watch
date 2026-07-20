@@ -155,6 +155,9 @@ def diagnose_date(
         )
     if climatology is not None and bool(climatology.attrs.get("climatology_fallback_used", False)):
         warning = "Daily smoothed climatology is unavailable; using the real monthly sensitivity baseline."
+    reference_period = climatology.attrs.get("reference_period") if climatology is not None else None
+    sampling_window = climatology.attrs.get("sampling_half_window_days") if climatology is not None else None
+    smoothing_window = climatology.attrs.get("smoothing_window_days") if climatology is not None else None
     report: dict[str, Any] = {
         "date": analysis_date,
         "data_mode": mode,
@@ -164,15 +167,9 @@ def diagnose_date(
             if climatology is not None
             else None
         ),
-        "climatology_reference_period": (
-            climatology.attrs.get("reference_period") if climatology is not None else None
-        ),
-        "climatology_sampling_window_days": (
-            climatology.attrs.get("sampling_half_window_days") if climatology is not None else None
-        ),
-        "climatology_smoothing_window_days": (
-            climatology.attrs.get("smoothing_window_days") if climatology is not None else None
-        ),
+        "climatology_reference_period": str(reference_period) if reference_period is not None else None,
+        "climatology_sampling_window_days": int(sampling_window) if sampling_window is not None else None,
+        "climatology_smoothing_window_days": int(smoothing_window) if smoothing_window is not None else None,
         "climatology_fallback_used": bool(
             climatology.attrs.get("climatology_fallback_used", False)
         ) if climatology is not None else False,

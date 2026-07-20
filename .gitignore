@@ -19,6 +19,7 @@ data/climatology/checkpoints_*/
 data/climatology/*.nc
 outputs/figures/*
 outputs/reports/*
+outputs/analytics/*
 
 # Mantener estructura de carpetas
 !data/demo/.gitkeep
