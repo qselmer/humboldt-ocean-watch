@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 import xarray as xr
@@ -12,7 +13,7 @@ import xarray as xr
 from src.charting import profile_chart, temporal_chart
 from src.daily_diagnosis import available_dates, diagnose_date, load_climatology
 from src.data_loader import load_active_sst_dataset
-from src.plotting import plot_thermal_field
+from src.plotting import plot_spatial_field
 from src.temporal_metrics import build_metrics_table
 from src.utils import configure_logging, load_config, resolve_project_path
 
@@ -111,7 +112,7 @@ with tabs[1]:
         ("SST anomaly", "sst_anomaly", "Anomaly (°C)", "RdBu_r", -5.0, 5.0),
         ("Standardized anomaly", "sst_z_score", "Z-score", "RdBu_r", -3.0, 3.0),
         ("Daily SST change", "sst_daily_change", "Change (°C)", "RdBu_r", -2.0, 2.0),
-        ("Anomaly persistence", "anomaly_persistence", "Persistence (fraction)", "magma", 0.0, 1.0),
+        ("Anomaly persistence", "anomaly_persistence", "Persistence (fraction)", "YlOrRd", 0.0, 1.0),
     ]
     for row_start in range(0, len(map_specs), 2):
         columns = st.columns(2)
@@ -122,13 +123,16 @@ with tabs[1]:
                     st.info(f"{title} requires the real 1991–2020 climatology.")
                 else:
                     map_field = fields[variable] / 100.0 if variable == "anomaly_persistence" else fields[variable]
-                    st.pyplot(
-                        plot_thermal_field(
-                            map_field, title=title, colorbar_label=label,
-                            cmap=cmap, vmin=vmin, vmax=vmax,
-                        ),
-                        width="stretch",
+                    fig = plot_spatial_field(
+                        map_field,
+                        title=f"{title} — {analysis_date}",
+                        colorbar_label=label,
+                        cmap=cmap,
+                        vmin=vmin,
+                        vmax=vmax,
                     )
+                    st.pyplot(fig, use_container_width=True)
+                    plt.close(fig)
 
 with tabs[2]:
     st.subheader("Regional time series")
@@ -160,7 +164,16 @@ with tabs[3]:
     else:
         left, right = st.columns(2)
         with left.container(border=True):
-            st.pyplot(plot_thermal_field(fields.anomaly_persistence / 100.0, title="Warm-anomaly persistence", colorbar_label="Persistence (fraction)", cmap="magma", vmin=0, vmax=1), width="stretch")
+            fig = plot_spatial_field(
+                fields.anomaly_persistence / 100.0,
+                title=f"Warm-anomaly persistence — {analysis_date}",
+                colorbar_label="Persistence (fraction)",
+                cmap="YlOrRd",
+                vmin=0,
+                vmax=1,
+            )
+            st.pyplot(fig, use_container_width=True)
+            plt.close(fig)
         with right.container(border=True):
             trajectory = series.dropna(subset=["warm_centroid_longitude", "warm_centroid_latitude"])
             st.subheader("Warm-anomaly centroid trajectory")
