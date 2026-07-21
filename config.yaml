@@ -90,3 +90,23 @@ representativeness:
   coexistence_fraction: 0.25
   epsilon: 1.0e-12
   output: outputs/analytics/representativeness.parquet
+
+event_detection:
+  source_variable: regional_mean_sst
+  source_metric: sst.weighted_mean
+  direction: above
+  threshold_type: daily_climatological
+  climatological_threshold_variable: threshold_p90
+  fixed_anomaly_threshold_c: 2.0
+  percentile: 0.90
+  minimum_duration_days: 5
+  allowed_gap_days: 2
+  maximum_calendar_gap_days: 1
+  minimum_valid_coverage: 0.80
+  comparison: inclusive
+  severity_bands:
+    strong: 1.0
+    extreme: 2.0
+  events_output: outputs/analytics/univariate_events.parquet
+  daily_flags_output: outputs/analytics/univariate_event_daily_flags.parquet
+  summary_output: outputs/analytics/univariate_event_summary.json
