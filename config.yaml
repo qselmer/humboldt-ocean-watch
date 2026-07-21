@@ -110,3 +110,22 @@ event_detection:
   events_output: outputs/analytics/univariate_events.parquet
   daily_flags_output: outputs/analytics/univariate_event_daily_flags.parquet
   summary_output: outputs/analytics/univariate_event_summary.json
+
+patch_detection:
+  source_variable: anomaly
+  direction: above
+  threshold_type: fixed
+  fixed_threshold: 2.0
+  standardized_threshold: 2.0
+  climatological_threshold_variable: threshold_p90
+  comparison: inclusive
+  connectivity: queen
+  minimum_patch_cells: 4
+  minimum_patch_area_km2: 0.0
+  remove_boundary_only_artifacts: false
+  save_label_cube: true
+  label_compression_level: 4
+  patches_output: outputs/analytics/daily_patches.parquet
+  daily_summary_output: outputs/analytics/daily_patch_summary.parquet
+  labels_output: outputs/analytics/daily_patch_labels.nc
+  json_summary_output: outputs/analytics/daily_patch_build_summary.json
