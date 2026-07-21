@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from src.daily_climatology import match_climatology
 from src.spatial_metrics import (
     area_weighted_mean,
     percentage_area_at_or_above_threshold,
@@ -15,11 +16,12 @@ from src.spatial_metrics import (
 
 METRIC_COLUMNS = [
     "date", "mean_sst_c", "seven_day_mean_sst_c", "mean_sst_anomaly_c",
-    "seven_day_mean_anomaly_c", "maximum_anomaly_c", "p90_anomaly_c",
+    "mean_standardized_anomaly", "seven_day_mean_anomaly_c", "maximum_anomaly_c", "p90_anomaly_c",
     "mean_daily_sst_change_c", "seven_day_sst_change_c",
     "area_anomaly_ge_1c_percent", "area_anomaly_ge_2c_percent",
-    "area_anomaly_ge_3c_percent", "area_zscore_ge_2_percent",
+    "area_anomaly_ge_3c_percent", "area_above_climatological_p90_percent", "area_zscore_ge_2_percent",
     "valid_data_coverage_percent", "warm_centroid_longitude", "warm_centroid_latitude",
+    "climatology_method", "climatology_reference_period", "climatology_fallback_used",
 ]
 
 
@@ -41,15 +43,15 @@ def build_metrics_table(dataset: xr.Dataset, climatology: xr.Dataset | None) -> 
     for column in anomaly_columns:
         result[column] = np.nan
     if climatology is not None:
-        mean = climatology.climatological_mean.sel(month=sst.time.dt.month)
-        std = climatology.climatological_standard_deviation.sel(month=sst.time.dt.month)
+        mean, std, daily_p90 = match_climatology(climatology, sst.time)
         anomaly = sst - mean
-        zscore = xr.where(std != 0, anomaly / std, np.nan)
+        zscore = xr.where(np.isfinite(std) & (std > 0), anomaly / std, np.nan)
         mean_anomaly = area_weighted_mean(anomaly)
         lat_weights = np.cos(np.deg2rad(anomaly.latitude))
         centroid_lon, centroid_lat = warm_anomaly_centroid(anomaly, 2.0)
         result.update({
             "mean_sst_anomaly_c": mean_anomaly.values,
+            "mean_standardized_anomaly": area_weighted_mean(zscore).values,
             "seven_day_mean_anomaly_c": mean_anomaly.rolling(time=7, min_periods=1).mean().values,
             "maximum_anomaly_c": anomaly.max(("latitude", "longitude"), skipna=True).values,
             "p90_anomaly_c": anomaly.weighted(lat_weights).quantile(0.9, dim=("latitude", "longitude"), skipna=True).values,
@@ -60,4 +62,18 @@ def build_metrics_table(dataset: xr.Dataset, climatology: xr.Dataset | None) -> 
             "warm_centroid_longitude": centroid_lon.values,
             "warm_centroid_latitude": centroid_lat.values,
         })
+        if daily_p90 is not None:
+            exceedance = xr.where(sst.notnull() & daily_p90.notnull(), (sst > daily_p90).astype(float), np.nan)
+            result["area_above_climatological_p90_percent"] = (
+                area_weighted_mean(exceedance).values * 100.0
+            )
+    result["climatology_method"] = (
+        str(climatology.attrs.get("climatology_method", "unknown")) if climatology is not None else None
+    )
+    result["climatology_reference_period"] = (
+        climatology.attrs.get("reference_period") if climatology is not None else None
+    )
+    result["climatology_fallback_used"] = (
+        bool(climatology.attrs.get("climatology_fallback_used", False)) if climatology is not None else False
+    )
     return result[METRIC_COLUMNS]

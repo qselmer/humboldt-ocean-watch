@@ -10,7 +10,6 @@ data:
   live_path: data/live/nino12_sst_nrt.nc
   demo_path: data/demo/synthetic_sst_daily.nc
   input_path: data/demo/synthetic_sst_daily.nc
-  climatology_path: data/climatology/nino12_monthly_climatology_1991_2020.nc
   metrics_path: data/processed/nino12_daily_metrics.parquet
   processed_path: data/processed/daily_snapshot.nc
   sst_aliases:
@@ -30,3 +29,151 @@ outputs:
 
 logging:
   level: INFO
+
+interface:
+  default_language: es
+  available_languages:
+    - es
+    - en
+  default_view_mode: basic
+  show_internal_ids: true
+
+climatology:
+  primary_method: daily_smoothed
+  reference_start: 1991
+  reference_end: 2020
+  sampling_half_window_days: 5
+  smoothing_window_days: 31
+  daily_path: data/climatology/nino12_daily_climatology_1991_2020.nc
+  monthly_path: data/climatology/nino12_monthly_climatology_1991_2020.nc
+  fallback_method: monthly
+  allow_monthly_fallback: true
+  allow_synthetic_fallback_with_real_data: false
+
+quality_control:
+  expected_frequency: "1D"
+  duplicate_policy: "error"
+  minimum_valid_coverage: 0.80
+  minimum_temporal_observations: 10
+  maximum_gap_days: 2
+  allow_irregular_intervals: true
+  fail_on_unknown_units: true
+  output: outputs/analytics/qc_report.json
+
+series_bank:
+  variables:
+    - sst
+    - anomaly
+    - zscore
+  warm_anomaly_threshold_c: 2.0
+  output: outputs/analytics/daily_series_bank.parquet
+
+temporal_features:
+  windows_days: [7, 15, 30, 90]
+  minimum_observations: 5
+  instability_threshold_c: 0.5
+  entropy_bins: 10
+  spectral_minimum_observations: 30
+  output: outputs/analytics/temporal_features.parquet
+
+spatial_features:
+  threshold_c: 2.0
+  minimum_valid_coverage: 0.80
+  connectivity: queen
+  minimum_patch_cells: 4
+  moran_weights: row_standardized
+  local_window_cells: 3
+  output: outputs/analytics/spatial_features.parquet
+
+representativeness:
+  minimum_coverage: 0.80
+  strong_signal_c: 1.0
+  weak_signal_c: 0.30
+  neutral_band_c: 0.25
+  coherent_sign_fraction: 0.75
+  heterogeneous_sd_c: 0.75
+  minimum_signal_heterogeneity_ratio: 1.0
+  dominant_patch_fraction: 0.60
+  patch_density_threshold: 0.02
+  coexistence_fraction: 0.25
+  epsilon: 1.0e-12
+  output: outputs/analytics/representativeness.parquet
+
+event_detection:
+  source_variable: regional_mean_sst
+  source_metric: sst.weighted_mean
+  direction: above
+  threshold_type: daily_climatological
+  climatological_threshold_variable: threshold_p90
+  fixed_anomaly_threshold_c: 2.0
+  percentile: 0.90
+  minimum_duration_days: 5
+  allowed_gap_days: 2
+  maximum_calendar_gap_days: 1
+  minimum_valid_coverage: 0.80
+  comparison: inclusive
+  severity_bands:
+    strong: 1.0
+    extreme: 2.0
+  events_output: outputs/analytics/univariate_events.parquet
+  daily_flags_output: outputs/analytics/univariate_event_daily_flags.parquet
+  summary_output: outputs/analytics/univariate_event_summary.json
+
+patch_detection:
+  source_variable: anomaly
+  direction: above
+  threshold_type: fixed
+  fixed_threshold: 2.0
+  standardized_threshold: 2.0
+  climatological_threshold_variable: threshold_p90
+  comparison: inclusive
+  connectivity: queen
+  minimum_patch_cells: 4
+  minimum_patch_area_km2: 0.0
+  remove_boundary_only_artifacts: false
+  save_label_cube: true
+  label_compression_level: 4
+  patches_output: outputs/analytics/daily_patches.parquet
+  daily_summary_output: outputs/analytics/daily_patch_summary.parquet
+  labels_output: outputs/analytics/daily_patch_labels.nc
+  json_summary_output: outputs/analytics/daily_patch_build_summary.json
+
+patch_tracking:
+  maximum_calendar_gap_days: 1
+  allow_gap_bridging: false
+  maximum_bridge_gap_days: 0
+  minimum_iou: 0.05
+  minimum_predecessor_overlap: 0.15
+  minimum_successor_overlap: 0.15
+  allow_distance_fallback: false
+  maximum_centroid_distance_km: 100.0
+  minimum_area_ratio: 0.25
+  maximum_area_ratio: 4.0
+  minimum_link_score: 0.10
+  score_weights:
+    iou: 0.40
+    predecessor_overlap: 0.20
+    successor_overlap: 0.20
+    centroid_proximity: 0.10
+    area_similarity: 0.10
+  preserve_all_candidate_edges: true
+  save_track_label_cube: true
+  label_compression_level: 4
+  observations_output: outputs/analytics/spatiotemporal_patch_observations.parquet
+  edges_output: outputs/analytics/patch_lineage_edges.parquet
+  tracks_output: outputs/analytics/spatiotemporal_tracks.parquet
+  families_output: outputs/analytics/spatiotemporal_event_families.parquet
+  track_labels_output: outputs/analytics/spatiotemporal_track_labels.nc
+  track_mapping_output: outputs/analytics/track_id_mapping.parquet
+  family_mapping_output: outputs/analytics/event_family_id_mapping.parquet
+  json_summary_output: outputs/analytics/spatiotemporal_tracking_summary.json
+
+event_dashboard:
+  default_subtab: event_overview
+  maximum_table_rows: 500
+  maximum_lineage_nodes: 300
+  trajectory_maximum_arrows: 25
+  show_patch_labels_default: true
+  show_patch_centroids_default: true
+  show_anomaly_background_default: true
+  show_family_tracks_default: true

@@ -9,6 +9,7 @@ import pandas as pd
 import xarray as xr
 
 from src.anomalies import calculate_anomaly, calculate_z_score
+from src.daily_climatology import match_climatology
 from src.data_loader import SYNTHETIC_DEMO_MODE, subset_nino12
 from src.spatial_metrics import (
     anomaly_persistence,
@@ -26,17 +27,19 @@ def available_dates(dataset: xr.Dataset) -> list[str]:
 
 
 def load_climatology(path: str) -> xr.Dataset:
-    """Load and validate an operational monthly climatology."""
+    """Load and validate an operational daily or monthly climatology."""
     with xr.open_dataset(path) as opened:
         climatology = opened.load()
-    required = {
-        "climatological_mean",
-        "climatological_standard_deviation",
-        "valid_observation_count",
-    }
+    required = (
+        {"climatology_mean", "climatology_std", "observation_count"}
+        if "climatological_day" in climatology.dims
+        else {"climatological_mean", "climatological_standard_deviation", "valid_observation_count"}
+    )
     missing = required - set(climatology.data_vars)
     if missing:
         raise ValueError(f"Climatology is missing variables: {sorted(missing)}")
+    if not ({"climatological_day", "dayofyear", "month"} & set(climatology.dims)):
+        raise ValueError("Climatology has no supported calendar dimension")
     return climatology
 
 
@@ -88,6 +91,8 @@ def diagnose_date(
         "valid_data_coverage_percent": float(valid_data_coverage(current)),
         "warm_centroid_longitude": None,
         "warm_centroid_latitude": None,
+        "area_above_climatological_p90_percent": None,
+        "percentile_warm_state": None,
     }
     warning = None
     if climatology is None:
@@ -96,12 +101,14 @@ def diagnose_date(
             "persistence, and anomaly spatial products are disabled."
         )
     else:
-        month = int(pd.Timestamp(analysis_date).month)
-        mean = climatology.climatological_mean.sel(month=month, drop=True)
-        std = climatology.climatological_standard_deviation.sel(month=month, drop=True)
+        selected_time = xr.DataArray([np.datetime64(analysis_date)], dims="time")
+        matched_mean, matched_std, matched_p90 = match_climatology(climatology, selected_time)
+        mean = matched_mean.isel(time=0, drop=True)
+        std = matched_std.isel(time=0, drop=True)
         anomaly = calculate_anomaly(current, mean)
         zscore = calculate_z_score(anomaly, std)
-        anomaly_series = regional.sst.groupby("time.month") - climatology.climatological_mean
+        series_mean, _, _ = match_climatology(climatology, regional.time)
+        anomaly_series = regional.sst - series_mean
         persistence = anomaly_persistence(
             anomaly_series, analysis_date, persistence_window, threshold
         )
@@ -116,6 +123,21 @@ def diagnose_date(
             latitude_anomaly_profile=latitude_profile,
             longitude_anomaly_profile=longitude_profile,
         )
+        if matched_p90 is not None:
+            p90_threshold = matched_p90.isel(time=0, drop=True)
+            p90_exceedance = (current > p90_threshold).where(current.notnull() & p90_threshold.notnull())
+            fields = fields.assign(
+                climatological_p90=p90_threshold,
+                p90_exceedance=p90_exceedance.rename("p90_exceedance"),
+                percentile_warm_state=xr.where(p90_exceedance, "above_p90", "not_above_p90").where(p90_exceedance.notnull()),
+            )
+            p90_area = float(area_weighted_mean(p90_exceedance.astype(float)) * 100.0)
+            metrics["area_above_climatological_p90_percent"] = p90_area
+            metrics["percentile_warm_state"] = (
+                "widespread_above_p90" if p90_area >= 50.0
+                else "localized_above_p90" if p90_area > 0.0
+                else "not_above_p90"
+            )
         lat_weights = np.cos(np.deg2rad(anomaly.latitude))
         metrics.update(
             mean_sst_anomaly_c=float(area_weighted_mean(anomaly)),
@@ -131,10 +153,29 @@ def diagnose_date(
             warm_centroid_longitude=float(centroid_lon) if centroid_lon.notnull() else None,
             warm_centroid_latitude=float(centroid_lat) if centroid_lat.notnull() else None,
         )
+    if climatology is not None and bool(climatology.attrs.get("climatology_fallback_used", False)):
+        warning = "Daily smoothed climatology is unavailable; using the real monthly sensitivity baseline."
+    reference_period = climatology.attrs.get("reference_period") if climatology is not None else None
+    sampling_window = climatology.attrs.get("sampling_half_window_days") if climatology is not None else None
+    smoothing_window = climatology.attrs.get("smoothing_window_days") if climatology is not None else None
     report: dict[str, Any] = {
         "date": analysis_date,
         "data_mode": mode,
         "climatology_available": climatology is not None,
+        "climatology_method": (
+            climatology.attrs.get("climatology_method")
+            if climatology is not None
+            else None
+        ),
+        "climatology_reference_period": str(reference_period) if reference_period is not None else None,
+        "climatology_sampling_window_days": int(sampling_window) if sampling_window is not None else None,
+        "climatology_smoothing_window_days": int(smoothing_window) if smoothing_window is not None else None,
+        "climatology_fallback_used": bool(
+            climatology.attrs.get("climatology_fallback_used", False)
+        ) if climatology is not None else False,
+        "climatology_file": (
+            climatology.attrs.get("climatology_file") if climatology is not None else None
+        ),
         "warning": warning,
         "threshold_c": threshold,
         "persistence_window_days": persistence_window,
