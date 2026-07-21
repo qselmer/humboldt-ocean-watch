@@ -23,6 +23,15 @@ from src.data_loader import load_active_sst_dataset
 from src.event_dashboard import render_thermal_events_tab
 from src.event_data_loader import load_event_products
 from src.export_utils import dumps_json_safe
+from src.help_content import (
+    glossary,
+    metric_tooltip,
+    representativeness_definition,
+    representativeness_notes,
+    scientific_disclaimer,
+)
+from src.i18n import human_label, tr
+from src.interpretation_text import interpret_representativeness
 from src.plotting import plot_centroid_trajectory, plot_spatial_field
 from src.representativeness import (
     RepresentativenessThresholds,
@@ -30,6 +39,7 @@ from src.representativeness import (
     classify_representativeness,
 )
 from src.temporal_metrics import build_metrics_table
+from src.sidebar_manual import is_advanced, render_first_use, render_help_sidebar
 from src.utils import configure_logging, load_config, resolve_project_path
 
 st.set_page_config(page_title="Humboldt Ocean Watch", page_icon=":material/waves:", layout="wide")
@@ -96,16 +106,37 @@ representativeness_thresholds = RepresentativenessThresholds.from_mapping(
 )
 dates = available_dates(dataset)
 
+active_main_tab = st.session_state.get("main_dashboard_tab", "Overview")
+language, view_mode = render_help_sidebar(config, active_main_tab)
+advanced_mode = is_advanced(view_mode)
+
 with st.sidebar:
-    st.header("Diagnosis controls")
-    analysis_date = st.selectbox("Analysis date", dates, index=len(dates) - 1)
-    period_choice = st.selectbox("Time-series period", [30, 90, 180, "All"], index=1)
-    anomaly_threshold = st.slider("Anomaly threshold (°C)", 0.5, 5.0, 2.0, 0.5)
-    persistence_window = st.segmented_control(
-        "Persistence window", [7, 15, 30], default=7, format_func=lambda value: f"{value} days"
+    st.header(tr("diagnosis_controls", language), anchor=False)
+    analysis_date = st.selectbox(
+        tr("analysis_date", language), dates, index=len(dates) - 1,
+        key="diagnosis_analysis_date",
     )
-    st.caption(f"Active mode: {data_mode}")
-    st.caption(f"Climatology: {climatology_method or 'Unavailable'}")
+    detail_context = (
+        st.container()
+        if advanced_mode
+        else st.expander(tr("advanced_diagnostics", language), expanded=False)
+    )
+    with detail_context:
+        period_choice = st.selectbox(
+            tr("time_series_period", language), [30, 90, 180, "All"],
+            index=1, key="diagnosis_period",
+        )
+        anomaly_threshold = st.slider(
+            tr("anomaly_threshold", language), 0.5, 5.0, 2.0, 0.5,
+            key="diagnosis_anomaly_threshold",
+        )
+        persistence_window = st.segmented_control(
+            tr("persistence_window", language), [7, 15, 30],
+            default=7, key="diagnosis_persistence_window",
+            format_func=lambda value: f"{value} {'días' if language == 'es' else 'days'}",
+        )
+    st.caption(f"{tr('active_mode', language)}: {data_mode}")
+    st.caption(f"{tr('climatology', language)}: {climatology_method or 'Unavailable'}")
 
 fields, diagnosis = diagnose_date(
     dataset,
@@ -168,17 +199,15 @@ st.caption(
     else f"Climatology status: {climatology_method or 'unavailable'}"
 )
 
+render_first_use(language, view_mode)
+tab_labels = [
+    "Overview", "Maps", "Time series", "Spatial behaviour",
+    "Quality and representativeness", "Thermal events", "Data and methods", "Export",
+]
+if st.session_state.get("main_dashboard_tab") not in (None, *tab_labels):
+    del st.session_state["main_dashboard_tab"]
 tabs = st.tabs(
-    [
-        "Overview",
-        "Maps",
-        "Time series",
-        "Spatial behaviour",
-        "Quality and representativeness",
-        "Thermal events",
-        "Data and methods",
-        "Export",
-    ]
+    tab_labels, default="Overview", key="main_dashboard_tab", on_change="rerun"
 )
 
 
@@ -195,7 +224,7 @@ def display_fraction(value: float | None) -> str:
 
 
 def display_class(value: str | None) -> str:
-    return value.replace("_", " ").capitalize() if value else "Unavailable"
+    return human_label(value, language) if value else tr("unavailable", language)
 
 
 with tabs[0]:
@@ -215,18 +244,28 @@ with tabs[0]:
         current_mean_anomaly = metrics["mean_sst_anomaly_c"]
     warm_area_fraction = current_representativeness_metrics.get("warm_area_fraction")
     with st.container(horizontal=True):
-        st.metric("Representativeness class", display_class(current_class), border=True)
-        st.metric("Valid coverage", display_fraction(current_coverage), border=True)
-        st.metric("Mean anomaly", display_value(current_mean_anomaly, "°C", True), border=True)
+        st.metric(tr("representativeness_class", language), display_class(current_class), border=True)
+        st.metric(
+            tr("valid_coverage", language), display_fraction(current_coverage),
+            help=metric_tooltip("valid_coverage", language), border=True,
+        )
+        st.metric(
+            tr("mean_anomaly", language), display_value(current_mean_anomaly, "°C", True),
+            help=metric_tooltip("mean_anomaly", language), border=True,
+        )
         st.metric(
             f"Warm-area fraction (≥ +{representativeness_thresholds.strong_signal_c:g} °C)",
             display_fraction(warm_area_fraction),
             border=True,
         )
-    st.info(
-        "Representativeness describes whether the regional mean adequately summarizes "
-        "the spatial anomaly conditions on the selected day; it is not an event classification."
+    interpretation_source = (
+        selected_representativeness.iloc[0]
+        if not selected_representativeness.empty
+        else {**current_representativeness_metrics, "class": current_class}
     )
+    st.markdown(f"**{tr('regional_interpretation', language)}**")
+    st.info(interpret_representativeness(analysis_date, interpretation_source, language))
+    st.caption(representativeness_notes(language))
 
 with tabs[1]:
     map_specs = [
@@ -339,11 +378,8 @@ with tabs[3]:
                 st.altair_chart(chart, width="stretch")
 
 with tabs[4]:
-    st.subheader("Quality and representativeness")
-    st.caption(
-        "These diagnostics assess whether the regional mean represents spatial conditions. "
-        "Class colors are nominal categories, not an ordinal severity ranking."
-    )
+    st.subheader(tr("quality_representativeness", language))
+    st.caption(representativeness_notes(language))
     if selected_representativeness.empty:
         st.info(
             "No representativeness row is available for the selected date. Run "
@@ -353,23 +389,30 @@ with tabs[4]:
         representative_row = selected_representativeness.iloc[0]
         with st.container(horizontal=True):
             st.metric(
-                "Current daily class",
+                tr("current_daily_class", language),
                 display_class(str(representative_row["class"])),
                 border=True,
             )
             st.metric(
-                "Evidence score",
+                tr("evidence_score", language),
                 display_value(float(representative_row["evidence_score"]), ""),
+                help=metric_tooltip("evidence_score", language),
                 border=True,
             )
             st.metric(
-                "Valid coverage",
+                tr("valid_coverage", language),
                 display_fraction(float(representative_row["valid_coverage"])),
+                help=metric_tooltip("valid_coverage", language),
                 border=True,
             )
+        st.info(interpret_representativeness(analysis_date, representative_row, language))
+        st.caption(representativeness_definition(str(representative_row["class"]), language))
         with st.container(border=True):
-            st.markdown("**Triggered rule**")
-            st.code(str(representative_row["triggered_rule"]), language=None)
+            st.markdown(f"**{tr('triggered_rule', language)}**")
+            triggered_rule = str(representative_row["triggered_rule"])
+            st.write(human_label(triggered_rule, language))
+            if advanced_mode:
+                st.caption(f"{tr('internal_id', language)}: {triggered_rule}")
 
         st.markdown("**Main input metrics**")
         main_metrics = pd.DataFrame([
@@ -507,10 +550,13 @@ with tabs[5]:
         representativeness=representativeness_table,
         anomaly=fields["sst_anomaly"] if "sst_anomaly" in fields else None,
         project_root=Path.cwd(),
+        language=language,
+        view_mode=view_mode,
+        show_internal_ids=bool(config["interface"]["show_internal_ids"]),
     )
 
 with tabs[6]:
-    st.subheader("Data and methods")
+    st.subheader(tr("data_methods", language))
     st.write({
         "active_mode": data_mode,
         "source": dataset.attrs.get("source_path"),
@@ -582,6 +628,16 @@ with tabs[6]:
         "is not an official El Niño Costero classification."
     )
     st.warning("Experimental product. Official ENSO and El Niño Costero classification is not provided.")
+    st.markdown(f"#### {tr('glossary', language)}")
+    glossary_rows = [
+        {
+            ("Término" if language == "es" else "Term"): human_label(term, language),
+            ("Definición" if language == "es" else "Definition"): definition,
+        }
+        for term, definition in glossary(language).items()
+    ]
+    st.dataframe(pd.DataFrame(glossary_rows), hide_index=True, width="stretch")
+    st.warning(scientific_disclaimer(language), icon=":material/science:")
     st.caption("Dates are read from the NetCDF time coordinate, never from global time-coverage attributes.")
 
 with tabs[7]:

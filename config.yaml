@@ -30,6 +30,14 @@ outputs:
 logging:
   level: INFO
 
+interface:
+  default_language: es
+  available_languages:
+    - es
+    - en
+  default_view_mode: basic
+  show_internal_ids: true
+
 climatology:
   primary_method: daily_smoothed
   reference_start: 1991
