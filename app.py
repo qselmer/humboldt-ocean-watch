@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -9,12 +10,23 @@ import pandas as pd
 import streamlit as st
 import xarray as xr
 
-from src.charting import centroid_temporal_chart, profile_chart, temporal_chart
+from src.charting import (
+    centroid_temporal_chart,
+    profile_chart,
+    representativeness_class_chart,
+    representativeness_temporal_chart,
+    temporal_chart,
+)
 from src.daily_climatology import select_climatology
 from src.daily_diagnosis import available_dates, diagnose_date
 from src.data_loader import load_active_sst_dataset
 from src.export_utils import dumps_json_safe
 from src.plotting import plot_centroid_trajectory, plot_spatial_field
+from src.representativeness import (
+    RepresentativenessThresholds,
+    calculate_daily_metrics,
+    classify_representativeness,
+)
 from src.temporal_metrics import build_metrics_table
 from src.utils import configure_logging, load_config, resolve_project_path
 
@@ -52,7 +64,33 @@ def load_operational_data() -> tuple[xr.Dataset, str, xr.Dataset | None, str | N
     return dataset, mode, selection.dataset, selection.method, selection.warning
 
 
+@st.cache_data(show_spinner=False, max_entries=2)
+def load_analytics_products() -> tuple[pd.DataFrame, dict]:
+    representativeness_path = resolve_project_path(config["representativeness"]["output"])
+    qc_path = resolve_project_path(config["quality_control"]["output"])
+    representativeness = (
+        pd.read_parquet(representativeness_path)
+        if representativeness_path.exists()
+        else pd.DataFrame()
+    )
+    if not representativeness.empty:
+        representativeness["date"] = pd.to_datetime(
+            representativeness["date"], errors="coerce"
+        )
+    qc_report = json.loads(qc_path.read_text(encoding="utf-8")) if qc_path.exists() else {}
+    return representativeness, qc_report
+
+
+@st.cache_data(show_spinner=False, max_entries=10)
+def load_download_file(path: str) -> bytes:
+    return Path(path).read_bytes()
+
+
 dataset, data_mode, climatology, climatology_method, climatology_warning = load_operational_data()
+representativeness_table, qc_report = load_analytics_products()
+representativeness_thresholds = RepresentativenessThresholds.from_mapping(
+    config["representativeness"]
+)
 dates = available_dates(dataset)
 
 with st.sidebar:
@@ -84,6 +122,36 @@ if period_choice != "All":
 else:
     series = metrics_table[metrics_table.date <= selected_time]
 metrics = diagnosis["metrics"]
+if not representativeness_table.empty:
+    if period_choice != "All":
+        representativeness_series = representativeness_table[
+            (representativeness_table.date >= selected_time - pd.Timedelta(days=int(period_choice) - 1))
+            & (representativeness_table.date <= selected_time)
+        ].copy()
+    else:
+        representativeness_series = representativeness_table[
+            representativeness_table.date <= selected_time
+        ].copy()
+    selected_representativeness = representativeness_table[
+        representativeness_table.date == selected_time
+    ]
+else:
+    representativeness_series = pd.DataFrame()
+    selected_representativeness = pd.DataFrame()
+
+current_representativeness_metrics: dict[str, float] = {}
+current_representativeness_classification = None
+if "sst_anomaly" in fields:
+    current_representativeness_metrics = calculate_daily_metrics(
+        fields.sst_anomaly,
+        representativeness_thresholds,
+        connectivity=config["spatial_features"]["connectivity"],
+        minimum_patch_cells=int(config["spatial_features"]["minimum_patch_cells"]),
+    )
+    current_representativeness_classification = classify_representativeness(
+        current_representativeness_metrics,
+        representativeness_thresholds,
+    )
 
 st.title("Humboldt Ocean Watch")
 st.caption("Experimental daily thermal monitoring for the Niño 1+2 region")
@@ -98,7 +166,15 @@ st.caption(
 )
 
 tabs = st.tabs(
-    ["Overview", "Maps", "Time series", "Spatial behaviour", "Data and methods", "Export"]
+    [
+        "Overview",
+        "Maps",
+        "Time series",
+        "Spatial behaviour",
+        "Quality and representativeness",
+        "Data and methods",
+        "Export",
+    ]
 )
 
 
@@ -108,21 +184,45 @@ def display_value(value: float | None, unit: str, signed: bool = False) -> str:
     return f"{value:+.2f} {unit}" if signed else f"{value:.2f} {unit}"
 
 
+def display_fraction(value: float | None) -> str:
+    if value is None or pd.isna(value):
+        return "Unavailable"
+    return f"{100.0 * value:.1f}%"
+
+
+def display_class(value: str | None) -> str:
+    return value.replace("_", " ").capitalize() if value else "Unavailable"
+
+
 with tabs[0]:
     st.subheader(f"Regional overview · {analysis_date}")
+    if not selected_representativeness.empty:
+        current_row = selected_representativeness.iloc[0]
+        current_class = str(current_row["class"])
+        current_coverage = float(current_row["valid_coverage"])
+        current_mean_anomaly = float(current_row["weighted_mean_anomaly"])
+    elif current_representativeness_classification is not None:
+        current_class = current_representativeness_classification.classification
+        current_coverage = current_representativeness_metrics["weighted_valid_coverage"]
+        current_mean_anomaly = current_representativeness_metrics["weighted_mean_anomaly"]
+    else:
+        current_class = None
+        current_coverage = None
+        current_mean_anomaly = metrics["mean_sst_anomaly_c"]
+    warm_area_fraction = current_representativeness_metrics.get("warm_area_fraction")
     with st.container(horizontal=True):
-        st.metric("Selected date", analysis_date, border=True)
-        st.metric("Mean SST", display_value(metrics["mean_sst_c"], "°C"), border=True)
-        st.metric("Mean anomaly", display_value(metrics["mean_sst_anomaly_c"], "°C", True), border=True)
-        st.metric("Maximum anomaly", display_value(metrics["maximum_anomaly_c"], "°C", True), border=True)
-    with st.container(horizontal=True):
+        st.metric("Representativeness class", display_class(current_class), border=True)
+        st.metric("Valid coverage", display_fraction(current_coverage), border=True)
+        st.metric("Mean anomaly", display_value(current_mean_anomaly, "°C", True), border=True)
         st.metric(
-            f"Area ≥ +{anomaly_threshold:g} °C",
-            display_value(metrics["area_anomaly_ge_threshold_percent"], "%"),
+            f"Warm-area fraction (≥ +{representativeness_thresholds.strong_signal_c:g} °C)",
+            display_fraction(warm_area_fraction),
             border=True,
         )
-        st.metric("Valid-data coverage", display_value(metrics["valid_data_coverage_percent"], "%"), border=True)
-        st.metric("Active data mode", data_mode, border=True)
+    st.info(
+        "Representativeness describes whether the regional mean adequately summarizes "
+        "the spatial anomaly conditions on the selected day; it is not an event classification."
+    )
 
 with tabs[1]:
     map_specs = [
@@ -235,6 +335,167 @@ with tabs[3]:
                 st.altair_chart(chart, width="stretch")
 
 with tabs[4]:
+    st.subheader("Quality and representativeness")
+    st.caption(
+        "These diagnostics assess whether the regional mean represents spatial conditions. "
+        "Class colors are nominal categories, not an ordinal severity ranking."
+    )
+    if selected_representativeness.empty:
+        st.info(
+            "No representativeness row is available for the selected date. Run "
+            "`uv run python scripts/build_representativeness.py` to refresh the cached table."
+        )
+    else:
+        representative_row = selected_representativeness.iloc[0]
+        with st.container(horizontal=True):
+            st.metric(
+                "Current daily class",
+                display_class(str(representative_row["class"])),
+                border=True,
+            )
+            st.metric(
+                "Evidence score",
+                display_value(float(representative_row["evidence_score"]), ""),
+                border=True,
+            )
+            st.metric(
+                "Valid coverage",
+                display_fraction(float(representative_row["valid_coverage"])),
+                border=True,
+            )
+        with st.container(border=True):
+            st.markdown("**Triggered rule**")
+            st.code(str(representative_row["triggered_rule"]), language=None)
+
+        st.markdown("**Main input metrics**")
+        main_metrics = pd.DataFrame([
+            {"Metric": "Mean anomaly", "Value": representative_row["weighted_mean_anomaly"], "Unit": "°C"},
+            {"Metric": "Spatial standard deviation", "Value": representative_row["spatial_standard_deviation"], "Unit": "°C"},
+            {"Metric": "Sign coherence", "Value": representative_row["sign_coherence"], "Unit": "fraction"},
+            {"Metric": "Signal-to-heterogeneity ratio", "Value": representative_row["signal_heterogeneity_ratio"], "Unit": "ratio"},
+            {"Metric": "Positive fraction", "Value": representative_row["positive_fraction"], "Unit": "fraction"},
+            {"Metric": "Negative fraction", "Value": representative_row["negative_fraction"], "Unit": "fraction"},
+            {"Metric": "Neutral fraction", "Value": representative_row["neutral_fraction"], "Unit": "fraction"},
+            {"Metric": "Dominant patch fraction", "Value": representative_row["dominant_patch_fraction"], "Unit": "fraction"},
+        ])
+        st.dataframe(
+            main_metrics,
+            hide_index=True,
+            column_config={"Value": st.column_config.NumberColumn(format="%.3f")},
+        )
+
+        class_chart = representativeness_class_chart(
+            representativeness_series,
+            selected_date=analysis_date,
+        )
+        if class_chart is not None:
+            st.altair_chart(class_chart, width="stretch")
+
+        continuous_columns = st.columns(2)
+        continuous_specs = [
+            (
+                continuous_columns[0],
+                ["sign_coherence"],
+                "Fraction",
+                "Sign coherence",
+                {"sign_coherence": "Sign coherence"},
+            ),
+            (
+                continuous_columns[1],
+                ["signal_heterogeneity_ratio"],
+                "Ratio",
+                "Signal-to-heterogeneity ratio",
+                {"signal_heterogeneity_ratio": "Signal-to-heterogeneity ratio"},
+            ),
+        ]
+        for column, columns, y_title, title, labels in continuous_specs:
+            with column.container(border=True):
+                chart = representativeness_temporal_chart(
+                    representativeness_series,
+                    columns=columns,
+                    selected_date=analysis_date,
+                    y_title=y_title,
+                    title=title,
+                    labels=labels,
+                )
+                if chart is None:
+                    st.info(f"No finite values are available for {title.lower()}.")
+                else:
+                    st.altair_chart(chart, width="stretch")
+
+        fraction_chart = representativeness_temporal_chart(
+            representativeness_series,
+            columns=["positive_fraction", "negative_fraction", "neutral_fraction"],
+            selected_date=analysis_date,
+            y_title="Weighted fraction",
+            title="Positive, negative, and neutral area fractions",
+            labels={
+                "positive_fraction": "Positive fraction",
+                "negative_fraction": "Negative fraction",
+                "neutral_fraction": "Neutral fraction",
+            },
+        )
+        if fraction_chart is not None:
+            st.altair_chart(fraction_chart, width="stretch")
+        dominant_chart = representativeness_temporal_chart(
+            representativeness_series,
+            columns=["dominant_patch_fraction"],
+            selected_date=analysis_date,
+            y_title="Weighted fraction",
+            title="Dominant patch fraction",
+            labels={"dominant_patch_fraction": "Dominant patch fraction"},
+        )
+        if dominant_chart is not None:
+            st.altair_chart(dominant_chart, width="stretch")
+
+    with st.container(border=True):
+        st.markdown("**QC summary**")
+        if qc_report:
+            with st.container(horizontal=True):
+                st.metric("QC status", str(qc_report.get("overall_status", "unknown")).capitalize())
+                st.metric("Dates checked", str(qc_report.get("number_of_dates", "Unavailable")))
+                st.metric(
+                    "Weighted coverage",
+                    display_fraction(qc_report.get("weighted_spatial_coverage")),
+                )
+                regular = qc_report.get("temporal_interval_summary", {}).get("regular")
+                st.metric("Daily intervals", "Regular" if regular else "Irregular")
+            qc_messages = [*qc_report.get("warnings", []), *qc_report.get("errors", [])]
+            if qc_messages:
+                st.warning("; ".join(map(str, qc_messages)))
+            else:
+                st.caption("No QC warnings or structural errors were reported.")
+        else:
+            st.info("The cached QC report is unavailable.")
+
+    st.markdown("**Analytics downloads**")
+    download_specs = [
+        ("QC report JSON", config["quality_control"]["output"], "qc_report.json", "application/json"),
+        ("Series bank", config["series_bank"]["output"], "daily_series_bank.parquet", "application/octet-stream"),
+        ("Temporal features", config["temporal_features"]["output"], "temporal_features.parquet", "application/octet-stream"),
+        ("Spatial features", config["spatial_features"]["output"], "spatial_features.parquet", "application/octet-stream"),
+        ("Representativeness table", config["representativeness"]["output"], "representativeness.parquet", "application/octet-stream"),
+    ]
+    with st.container(horizontal=True):
+        for label, configured_path, file_name, mime in download_specs:
+            local_path = resolve_project_path(configured_path)
+            if local_path.exists():
+                st.download_button(
+                    label=label,
+                    data=load_download_file(str(local_path)),
+                    file_name=file_name,
+                    mime=mime,
+                    key=f"analytics_download_{file_name}",
+                )
+            else:
+                st.button(
+                    label,
+                    disabled=True,
+                    key=f"analytics_missing_{file_name}",
+                    help=f"Cached file is unavailable: {local_path}",
+                )
+
+with tabs[5]:
     st.subheader("Data and methods")
     st.write({
         "active_mode": data_mode,
@@ -263,7 +524,7 @@ with tabs[4]:
     st.warning("Experimental product. Official ENSO and El Niño Costero classification is not provided.")
     st.caption("Dates are read from the NetCDF time coordinate, never from global time-coverage attributes.")
 
-with tabs[5]:
+with tabs[6]:
     st.subheader("Export selected diagnosis")
     st.download_button("Download temporal metrics CSV", series.to_csv(index=False), "nino12_daily_metrics.csv", "text/csv")
     st.download_button("Download diagnosis NetCDF", bytes(fields.to_netcdf()), f"nino12_diagnosis_{analysis_date}.nc", "application/x-netcdf")

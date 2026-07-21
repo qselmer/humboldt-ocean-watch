@@ -11,6 +11,16 @@ import xarray as xr
 
 PROFILE_VALUE_COLUMN = "sst_anomaly_c"
 
+REPRESENTATIVENESS_CLASS_COLORS = {
+    "insufficient_coverage": "#7f7f7f",
+    "strong_coherent": "#0072B2",
+    "strong_heterogeneous": "#E69F00",
+    "compensated_mixed": "#CC79A7",
+    "patch_distributed": "#009E73",
+    "weak_homogeneous": "#56B4E9",
+    "unclassified": "#4D4D4D",
+}
+
 
 def finite_numeric_domain(
     values: pd.Series | np.ndarray, *, padding_fraction: float = 0.0
@@ -167,3 +177,122 @@ def centroid_temporal_chart(
         x=alt.X("selected_date:T")
     )
     return (line + rule).properties(title=f"Centroid {coordinate} through time", height=280).interactive()
+
+
+def representativeness_class_chart(
+    data: pd.DataFrame,
+    *,
+    selected_date: str,
+) -> alt.LayerChart | None:
+    """Create a nominal-color class timeline without an ordinal y-axis."""
+    required = {"date", "class", "triggered_rule", "evidence_score"}
+    if not required.issubset(data.columns):
+        return None
+    frame = data[list(required)].copy()
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    frame = frame[frame.date.notna() & frame["class"].notna()].sort_values("date")
+    if frame.empty:
+        return None
+    date_min, date_max = frame.date.min(), frame.date.max()
+    if date_min == date_max:
+        date_min -= pd.Timedelta(hours=12)
+        date_max += pd.Timedelta(hours=12)
+    classes = list(REPRESENTATIVENESS_CLASS_COLORS)
+    timeline = (
+        alt.Chart(frame)
+        .mark_tick(size=34, thickness=7)
+        .encode(
+            x=alt.X("date:T", title="Date", scale=alt.Scale(domain=[date_min, date_max])),
+            y=alt.value(24),
+            color=alt.Color(
+                "class:N",
+                title="Representativeness class (nominal)",
+                scale=alt.Scale(
+                    domain=classes,
+                    range=[REPRESENTATIVENESS_CLASS_COLORS[name] for name in classes],
+                ),
+            ),
+            tooltip=[
+                alt.Tooltip("date:T", title="Date"),
+                alt.Tooltip("class:N", title="Class"),
+                alt.Tooltip("triggered_rule:N", title="Triggered rule"),
+                alt.Tooltip("evidence_score:Q", title="Evidence score", format=".2f"),
+            ],
+        )
+    )
+    rule = alt.Chart(pd.DataFrame({"selected_date": [pd.Timestamp(selected_date)]})).mark_rule(
+        color="#D55E00", strokeDash=[5, 4], size=2
+    ).encode(x="selected_date:T")
+    return (
+        timeline + rule
+    ).properties(
+        title="Daily representativeness classes",
+        description="Nominal daily class colors; vertical rule marks the selected date.",
+        height=80,
+    ).interactive()
+
+
+def representativeness_temporal_chart(
+    data: pd.DataFrame,
+    *,
+    columns: Sequence[str],
+    selected_date: str,
+    y_title: str,
+    title: str,
+    labels: dict[str, str] | None = None,
+) -> alt.LayerChart | None:
+    """Create continuous representativeness series with dynamic limits and date rule."""
+    existing = [column for column in columns if column in data.columns]
+    if "date" not in data.columns or not existing:
+        return None
+    frame = data[["date", *existing]].copy()
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    long = frame.melt(
+        id_vars="date",
+        value_vars=existing,
+        var_name="_representativeness_series",
+        value_name="_representativeness_value",
+    )
+    long["_representativeness_value"] = pd.to_numeric(
+        long["_representativeness_value"], errors="coerce"
+    ).replace([np.inf, -np.inf], np.nan)
+    if labels:
+        long["_representativeness_series"] = long["_representativeness_series"].replace(labels)
+    long = long[long.date.notna()].copy()
+    y_domain = finite_numeric_domain(
+        long["_representativeness_value"], padding_fraction=0.05
+    )
+    if long.empty or y_domain is None:
+        return None
+    date_min, date_max = long.date.min(), long.date.max()
+    if date_min == date_max:
+        date_min -= pd.Timedelta(hours=12)
+        date_max += pd.Timedelta(hours=12)
+    line = (
+        alt.Chart(long)
+        .mark_line(point=True, invalid="break-paths-show-domains")
+        .encode(
+            x=alt.X("date:T", title="Date", scale=alt.Scale(domain=[date_min, date_max])),
+            y=alt.Y(
+                "_representativeness_value:Q",
+                title=y_title,
+                scale=alt.Scale(domain=list(y_domain), zero=False),
+            ),
+            color=alt.Color("_representativeness_series:N", title="Series"),
+            tooltip=[
+                alt.Tooltip("date:T", title="Date"),
+                alt.Tooltip("_representativeness_series:N", title="Series"),
+                alt.Tooltip("_representativeness_value:Q", title="Value", format=".3f"),
+            ],
+        )
+    )
+    rule = alt.Chart(pd.DataFrame({"selected_date": [pd.Timestamp(selected_date)]})).mark_rule(
+        color="#D55E00", strokeDash=[5, 4], size=2
+    ).encode(x="selected_date:T")
+    return (
+        line + rule
+    ).properties(
+        title=title,
+        description=f"{title}; vertical rule marks the selected date.",
+        height=280,
+    ).interactive()

@@ -50,6 +50,7 @@ quality_control:
   maximum_gap_days: 2
   allow_irregular_intervals: true
   fail_on_unknown_units: true
+  output: outputs/analytics/qc_report.json
 
 series_bank:
   variables:
@@ -75,3 +76,17 @@ spatial_features:
   moran_weights: row_standardized
   local_window_cells: 3
   output: outputs/analytics/spatial_features.parquet
+
+representativeness:
+  minimum_coverage: 0.80
+  strong_signal_c: 1.0
+  weak_signal_c: 0.30
+  neutral_band_c: 0.25
+  coherent_sign_fraction: 0.75
+  heterogeneous_sd_c: 0.75
+  minimum_signal_heterogeneity_ratio: 1.0
+  dominant_patch_fraction: 0.60
+  patch_density_threshold: 0.02
+  coexistence_fraction: 0.25
+  epsilon: 1.0e-12
+  output: outputs/analytics/representativeness.parquet
