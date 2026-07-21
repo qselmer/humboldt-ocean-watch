@@ -58,3 +58,20 @@ series_bank:
     - zscore
   warm_anomaly_threshold_c: 2.0
   output: outputs/analytics/daily_series_bank.parquet
+
+temporal_features:
+  windows_days: [7, 15, 30, 90]
+  minimum_observations: 5
+  instability_threshold_c: 0.5
+  entropy_bins: 10
+  spectral_minimum_observations: 30
+  output: outputs/analytics/temporal_features.parquet
+
+spatial_features:
+  threshold_c: 2.0
+  minimum_valid_coverage: 0.80
+  connectivity: queen
+  minimum_patch_cells: 4
+  moran_weights: row_standardized
+  local_window_cells: 3
+  output: outputs/analytics/spatial_features.parquet
