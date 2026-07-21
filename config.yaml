@@ -159,3 +159,13 @@ patch_tracking:
   track_mapping_output: outputs/analytics/track_id_mapping.parquet
   family_mapping_output: outputs/analytics/event_family_id_mapping.parquet
   json_summary_output: outputs/analytics/spatiotemporal_tracking_summary.json
+
+event_dashboard:
+  default_subtab: event_overview
+  maximum_table_rows: 500
+  maximum_lineage_nodes: 300
+  trajectory_maximum_arrows: 25
+  show_patch_labels_default: true
+  show_patch_centroids_default: true
+  show_anomaly_background_default: true
+  show_family_tracks_default: true

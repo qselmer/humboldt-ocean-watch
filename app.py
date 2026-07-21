@@ -20,6 +20,8 @@ from src.charting import (
 from src.daily_climatology import select_climatology
 from src.daily_diagnosis import available_dates, diagnose_date
 from src.data_loader import load_active_sst_dataset
+from src.event_dashboard import render_thermal_events_tab
+from src.event_data_loader import load_event_products
 from src.export_utils import dumps_json_safe
 from src.plotting import plot_centroid_trajectory, plot_spatial_field
 from src.representativeness import (
@@ -88,6 +90,7 @@ def load_download_file(path: str) -> bytes:
 
 dataset, data_mode, climatology, climatology_method, climatology_warning = load_operational_data()
 representativeness_table, qc_report = load_analytics_products()
+event_products = load_event_products(config, root=Path.cwd())
 representativeness_thresholds = RepresentativenessThresholds.from_mapping(
     config["representativeness"]
 )
@@ -172,6 +175,7 @@ tabs = st.tabs(
         "Time series",
         "Spatial behaviour",
         "Quality and representativeness",
+        "Thermal events",
         "Data and methods",
         "Export",
     ]
@@ -496,6 +500,16 @@ with tabs[4]:
                 )
 
 with tabs[5]:
+    render_thermal_events_tab(
+        event_products,
+        config,
+        analysis_date=analysis_date,
+        representativeness=representativeness_table,
+        anomaly=fields["sst_anomaly"] if "sst_anomaly" in fields else None,
+        project_root=Path.cwd(),
+    )
+
+with tabs[6]:
     st.subheader("Data and methods")
     st.write({
         "active_mode": data_mode,
@@ -521,10 +535,56 @@ with tabs[5]:
             if climatology is not None else "not_calculated"
         ),
     })
+    st.markdown("#### Increment 4 event definitions")
+    st.write({
+        "univariate_events": {
+            "source_series": config["event_detection"].get("source_metric"),
+            "threshold_type": config["event_detection"]["threshold_type"],
+            "fixed_threshold": config["event_detection"].get("fixed_anomaly_threshold_c"),
+            "minimum_duration_days": config["event_detection"]["minimum_duration_days"],
+            "allowed_interruptions_days": config["event_detection"]["allowed_gap_days"],
+            "maximum_calendar_gap_days": config["event_detection"]["maximum_calendar_gap_days"],
+        },
+        "daily_patches": {
+            "source_variable": config["patch_detection"]["source_variable"],
+            "direction": config["patch_detection"]["direction"],
+            "threshold_type": config["patch_detection"]["threshold_type"],
+            "connectivity": config["patch_detection"]["connectivity"],
+            "minimum_patch_cells": config["patch_detection"]["minimum_patch_cells"],
+            "minimum_patch_area_km2": config["patch_detection"]["minimum_patch_area_km2"],
+            "area_method": "Spherical latitude-longitude cell quadrilaterals",
+        },
+        "tracking": {
+            "maximum_calendar_gap_days": config["patch_tracking"]["maximum_calendar_gap_days"],
+            "minimum_iou": config["patch_tracking"]["minimum_iou"],
+            "minimum_predecessor_overlap": config["patch_tracking"]["minimum_predecessor_overlap"],
+            "minimum_successor_overlap": config["patch_tracking"]["minimum_successor_overlap"],
+            "distance_fallback": config["patch_tracking"]["allow_distance_fallback"],
+            "minimum_link_score": config["patch_tracking"]["minimum_link_score"],
+            "score_weights": config["patch_tracking"]["score_weights"],
+            "continuation_backbone": "Deterministic maximum-score one-to-one assignment",
+            "track_definition": "Maximal non-branching path through the lineage DAG",
+            "event_family_definition": "Weakly connected component including splits and merges",
+        },
+    })
+    st.markdown("#### Cached event-product status")
+    st.write({
+        "daily_patch_label_cube": str(resolve_project_path(config["patch_detection"]["labels_output"])),
+        "track_and_family_label_cube": str(resolve_project_path(config["patch_tracking"]["track_labels_output"])),
+        "tracking_summary_status": event_products.tracking_summary.status,
+    })
+    st.markdown("#### Event-tracking limitations")
+    st.info(
+        "Local daily patch IDs are not persistent. Tracks are maximal non-branching paths, while event "
+        "families may contain splits and merges. Results depend on threshold and connectivity, and small "
+        "threshold changes can alter lineage structure. Boundary-touching tracks may be incomplete. "
+        "Tracking describes thermal features, not individual water parcels. This experimental product "
+        "is not an official El Niño Costero classification."
+    )
     st.warning("Experimental product. Official ENSO and El Niño Costero classification is not provided.")
     st.caption("Dates are read from the NetCDF time coordinate, never from global time-coverage attributes.")
 
-with tabs[6]:
+with tabs[7]:
     st.subheader("Export selected diagnosis")
     st.download_button("Download temporal metrics CSV", series.to_csv(index=False), "nino12_daily_metrics.csv", "text/csv")
     st.download_button("Download diagnosis NetCDF", bytes(fields.to_netcdf()), f"nino12_diagnosis_{analysis_date}.nc", "application/x-netcdf")
