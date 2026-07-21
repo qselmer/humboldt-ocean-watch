@@ -129,3 +129,33 @@ patch_detection:
   daily_summary_output: outputs/analytics/daily_patch_summary.parquet
   labels_output: outputs/analytics/daily_patch_labels.nc
   json_summary_output: outputs/analytics/daily_patch_build_summary.json
+
+patch_tracking:
+  maximum_calendar_gap_days: 1
+  allow_gap_bridging: false
+  maximum_bridge_gap_days: 0
+  minimum_iou: 0.05
+  minimum_predecessor_overlap: 0.15
+  minimum_successor_overlap: 0.15
+  allow_distance_fallback: false
+  maximum_centroid_distance_km: 100.0
+  minimum_area_ratio: 0.25
+  maximum_area_ratio: 4.0
+  minimum_link_score: 0.10
+  score_weights:
+    iou: 0.40
+    predecessor_overlap: 0.20
+    successor_overlap: 0.20
+    centroid_proximity: 0.10
+    area_similarity: 0.10
+  preserve_all_candidate_edges: true
+  save_track_label_cube: true
+  label_compression_level: 4
+  observations_output: outputs/analytics/spatiotemporal_patch_observations.parquet
+  edges_output: outputs/analytics/patch_lineage_edges.parquet
+  tracks_output: outputs/analytics/spatiotemporal_tracks.parquet
+  families_output: outputs/analytics/spatiotemporal_event_families.parquet
+  track_labels_output: outputs/analytics/spatiotemporal_track_labels.nc
+  track_mapping_output: outputs/analytics/track_id_mapping.parquet
+  family_mapping_output: outputs/analytics/event_family_id_mapping.parquet
+  json_summary_output: outputs/analytics/spatiotemporal_tracking_summary.json
