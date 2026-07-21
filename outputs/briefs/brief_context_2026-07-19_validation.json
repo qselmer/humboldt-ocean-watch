@@ -1,0 +1,22 @@
+{
+  "result": "warning",
+  "strict": true,
+  "schema_version": "1.0.0",
+  "payload_bytes": 140601,
+  "maximum_payload_bytes": 153600,
+  "errors": [],
+  "warnings": [],
+  "checks": {
+    "structure": true,
+    "numbers": true,
+    "provenance": true,
+    "generation_safety": true,
+    "payload": true
+  },
+  "statistics": {
+    "fact_count": 153,
+    "valid_fact_count": 149,
+    "unavailable_fact_count": 4,
+    "quality_flag_count": 1
+  }
+}

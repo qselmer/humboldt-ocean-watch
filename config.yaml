@@ -177,3 +177,29 @@ event_dashboard:
   show_patch_centroids_default: true
   show_anomaly_background_default: true
   show_family_tracks_default: true
+
+brief_context:
+  schema_version: "1.0.0"
+  output_directory: outputs/briefs
+  default_analysis_date: latest
+  strict_validation: true
+  maximum_payload_kb: 150
+  recent_windows_days:
+    - 1
+    - 7
+    - 15
+    - 30
+  maximum_top_patches: 5
+  maximum_top_tracks: 5
+  maximum_top_families: 3
+  stable_change_thresholds:
+    mean_sst_c: 0.10
+    mean_anomaly_c: 0.10
+    warm_area_fraction: 0.02
+    valid_coverage: 0.02
+    centroid_latitude_degrees: 0.10
+    centroid_longitude_degrees: 0.10
+  minimum_valid_coverage: 0.80
+  include_internal_ids: true
+  include_provenance: true
+  include_bilingual_labels: true
