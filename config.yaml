@@ -72,6 +72,71 @@ geography:
     show_coastal_corridor: true
     show_labels: true
 
+# Multidomain SST foundation. Geographic bounds are resolved exclusively from
+# the registry above; the legacy ``region`` and ``data`` blocks remain the
+# operational Niño 1+2 contract.
+sst:
+  coordinate_convention: "-180_to_180"
+  active_operational_domain: nino12
+  domains:
+    nino12:
+      label: Niño 1+2 operational SST
+      geography_type: standard_region
+      geography_id: nino12
+      role: current_operational
+      target_resolution_degrees: 0.05
+      live_path: data/live/sst/nino12_sst_nrt.nc
+      demo_path: data/demo/sst/nino12_sst_demo.nc
+      legacy_live_path: data/live/nino12_sst_nrt.nc
+      legacy_demo_path: data/demo/synthetic_sst_daily.nc
+      allow_demo_fallback: true
+      climatology:
+        daily_path: data/climatology/nino12_daily_climatology_1991_2020.nc
+        monthly_path: data/climatology/nino12_monthly_climatology_1991_2020.nc
+        status: available_or_existing
+    pacific_context:
+      label: Pacific context SST
+      geography_type: analysis_domain
+      geography_id: pacific_context
+      role: contextual_display
+      target_resolution_degrees: 0.25
+      live_path: data/live/sst/pacific_context_sst_nrt.nc
+      demo_path: data/demo/sst/pacific_context_sst_demo.nc
+      allow_demo_fallback: true
+      climatology:
+        daily_path: data/climatology/sst/pacific_context_daily_1991_2020.nc
+        monthly_path: data/climatology/sst/pacific_context_monthly_1991_2020.nc
+        status: not_built
+    humboldt_coastal:
+      label: Humboldt coastal SST
+      geography_type: analysis_domain
+      geography_id: humboldt_coastal
+      role: coastal_analysis_foundation
+      target_resolution_degrees: 0.05
+      live_path: data/live/sst/humboldt_coastal_sst_nrt.nc
+      demo_path: data/demo/sst/humboldt_coastal_sst_demo.nc
+      allow_demo_fallback: true
+      climatology:
+        daily_path: data/climatology/sst/humboldt_coastal_daily_1991_2020.nc
+        monthly_path: data/climatology/sst/humboldt_coastal_monthly_1991_2020.nc
+        status: not_built
+  regional_indices:
+    source_domain: pacific_context
+    regions: [nino34, nino3, nino12]
+    minimum_valid_coverage: 0.80
+    output: outputs/analytics/sst/nino_region_sst.parquet
+  aggregation:
+    minimum_valid_fraction: 0.80
+    regular_grid_tolerance: 0.001
+    integer_factor_tolerance: 0.001
+    method: cosine_latitude_weighted_block_mean
+  outputs:
+    status: outputs/analytics/sst/multidomain_sst_status.json
+    snapshot: outputs/analytics/sst/multidomain_sst_snapshot.json
+    processed_directory: data/processed/sst
+    preview_figure: outputs/figures/multidomain_sst_preview.png
+    preview_report: outputs/reports/multidomain_sst_preview.json
+
 data:
   live_path: data/live/nino12_sst_nrt.nc
   demo_path: data/demo/synthetic_sst_daily.nc

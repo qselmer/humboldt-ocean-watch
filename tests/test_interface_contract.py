@@ -102,6 +102,27 @@ def test_dashboard_retains_all_scientific_and_export_surfaces() -> None:
         assert symbol in source
 
 
+def test_multidomain_section_is_cached_local_and_non_invasive() -> None:
+    source = _app_source()
+    assert "Multidomain SST foundation" in source
+    assert "@st.cache_data" in source
+    assert "uv run python scripts\\\\generate_multidomain_demo_data.py --all" in source
+    assert "uv run python scripts\\\\build_multidomain_sst_snapshot.py --allow-demo" in source
+    assert "uv run python scripts\\\\preview_multidomain_sst.py" in source
+    tree = ast.parse(source)
+    imported_modules = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    } | {
+        node.module or ""
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+    }
+    assert not any(module.startswith("scripts") for module in imported_modules)
+
+
 def test_no_legacy_spanish_interface_labels_are_rendered() -> None:
     source = _app_source()
     for obsolete_label in (

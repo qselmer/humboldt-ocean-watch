@@ -17,6 +17,7 @@ validated locally by Python; they do not calculate the scientific metrics.
 
 - [Main capabilities](#main-capabilities)
 - [Geographic foundation](#geographic-foundation)
+- [Multidomain SST foundation](#multidomain-sst-foundation)
 - [System architecture](#system-architecture)
 - [Repository structure](#repository-structure)
 - [End-to-end workflow](#end-to-end-workflow)
@@ -105,17 +106,94 @@ uv run python scripts\preview_geographic_foundation.py `
   --overwrite
 ```
 
-Current SST, climatology, event, patch, and track calculations remain
-restricted to Niño 1+2. The planned sequence is:
+Current operational climatology, anomaly, event, patch, track,
+representativeness, and brief calculations remain restricted to Niño 1+2. The
+planned sequence is:
 
 1. Increment 6A — Geographic foundation
 2. Increment 6B — English interpretability-first interface
-3. Increment 6C — Multidomain SST
+3. Increment 6C — Multidomain SST foundation (implemented offline)
 4. Increment 6D — Dynamic SST refresh
 5. Increment 7A — South Pacific High
 6. Increment 7B — Atmospheric climatology
 7. Increment 8 — Ecosystem products
 8. Increment 9 — Multivariate integration
+
+## Multidomain SST foundation
+
+Increment 6C1 separates SST loading into three configured domains while
+preserving the validated Niño 1+2 pipeline:
+
+- `nino12` is the **current operational domain**. Its legacy `region`, data
+  paths, calculations, events, patches, tracks, families, representativeness,
+  and briefs are unchanged. New-path resolution falls back to
+  `data/live/nino12_sst_nrt.nc` and `data/demo/synthetic_sst_daily.nc` during
+  the transition.
+- `pacific_context` is a **contextual display domain** at a target resolution
+  of 0.25°. It contains the canonical Niño 3.4, Niño 3, and Niño 1+2
+  rectangles.
+- `humboldt_coastal` is a **coastal-analysis foundation** at 0.05° from Ecuador
+  to 45°S. The 60-nautical-mile overlay is derived only from the continental
+  mainland coastline; islands remain part of the land mask but never generate
+  buffers.
+
+Domain bounds are resolved from `geography`; `sst.domains` stores only the
+geography reference, role, target resolution, local paths, fallback policy,
+and climatology status. The new configured local inputs are:
+
+```text
+data/live/sst/pacific_context_sst_nrt.nc
+data/demo/sst/pacific_context_sst_demo.nc
+data/live/sst/humboldt_coastal_sst_nrt.nc
+data/demo/sst/humboldt_coastal_sst_demo.nc
+```
+
+Generate deterministic mathematical demo data, build the validated local
+snapshot, and render its offline preview explicitly:
+
+```powershell
+uv run python scripts\generate_multidomain_demo_data.py --all
+uv run python scripts\build_multidomain_sst_snapshot.py --allow-demo
+uv run python scripts\preview_multidomain_sst.py
+```
+
+The demo files use source Kelvin units to exercise normalization, but they are
+labelled **synthetic demonstration data** and do not represent current ocean
+conditions. Streamlit never runs these commands, generates demos, writes
+products, downloads data, or refreshes SST automatically. It reads the
+pre-built cache in **Data and methods → Multidomain SST foundation**.
+
+Regular fine grids can be reduced to the configured target resolution by
+cosine-latitude-weighted block means. The implementation rejects upsampling,
+irregular grids, and non-integer resolution factors; respects NaN values;
+retains documented partial edge blocks; and applies the configured weighted
+valid-coverage gate. Niño daily mean SST is calculated from the finest
+available `pacific_context` source grid before display aggregation, with
+cosine-latitude weighting, weighted valid coverage, and explicit cell counts.
+
+These daily source-grid SST means are not NOAA's official monthly indices and
+are not ONI. Niño 3.4 and Niño 3 anomalies remain null with status
+`not_calculated_no_compatible_climatology` until compatible spatial and
+temporal climatologies are built. No official ENSO classification or threshold
+interpretation is produced.
+
+Built products are local and Git-ignored:
+
+```text
+outputs/analytics/sst/multidomain_sst_status.json
+outputs/analytics/sst/multidomain_sst_snapshot.json
+outputs/analytics/sst/nino_region_sst.parquet
+data/processed/sst/pacific_context_latest.nc
+data/processed/sst/humboldt_coastal_latest.nc
+outputs/figures/multidomain_sst_preview.png
+outputs/reports/multidomain_sst_preview.json
+```
+
+Current limitations are deliberate: no complete contextual climatologies, no
+automatic or remote availability check, no atmospheric pressure or wind
+products, no ecological variables, and no multivariate integration. Increment
+6C2/6D is the planned dynamic SST refresh layer; it must preserve the same
+domain contracts and explicit offline-safe dashboard behavior.
 
 ## System architecture
 
@@ -184,6 +262,9 @@ humboldt-ocean-watch/
 | Script | Purpose |
 | --- | --- |
 | `generate_demo_data.py` | Creates the configured synthetic daily SST NetCDF file. |
+| `generate_multidomain_demo_data.py` | Explicitly creates deterministic Kelvin-source SST demos for Pacific context and Humboldt coastal domains. |
+| `build_multidomain_sst_snapshot.py` | Loads and validates local domains, applies configured aggregation, calculates daily Niño-region SST means, and atomically publishes cached products. |
+| `preview_multidomain_sst.py` | Renders the three-panel offline multidomain SST validation preview and JSON report. |
 | `build_climatology.py` | Builds the resumable monthly 1991–2020 OSTIA climatology year by year. |
 | `build_daily_climatology.py` | Builds the stable-calendar, smoothed daily 1991–2020 climatology with validated yearly checkpoints. |
 | `validate_daily_climatology.py` | Checks daily climatology structure, units, finite values, calendar mapping, percentiles, and temporal continuity; writes JSON and PNG validation products. |
@@ -214,6 +295,7 @@ of scripts that use `argparse`. The three simple entry points
 | Module group | Responsibilities |
 | --- | --- |
 | `data_loader.py`, `climatology.py`, `daily_climatology.py`, `daily_diagnosis.py`, `anomalies.py` | Input discovery, SST alias and unit normalization, stable-calendar climatology selection/matching, anomaly fields, and date-specific diagnoses. |
+| `sst_domains.py`, `sst_aggregation.py`, `multidomain_sst.py`, `sst_regional_indices.py` | Immutable geography-referenced SST domain contracts, regular-grid block aggregation, failure-isolated offline loading, and weighted daily Niño-region SST means. |
 | `quality_control.py`, `metric_result.py`, `feature_metadata.py`, `series_bank.py` | Structural validation, weighted coverage, recoverable metric status, canonical metric metadata, and long-format daily series. |
 | `temporal_metrics.py`, `temporal_features.py` | Operational daily metrics and date-aware rolling temporal features. |
 | `spatial_metrics.py`, `spatial_features.py`, `spatial_adjacency.py`, `grid_geometry.py` | Area weighting, weighted statistics, gradients, Moran I, local variability, adjacency, spherical cell geometry, and daily patch descriptors. |
@@ -404,7 +486,8 @@ help, and export modules. Its main tabs are:
   and trajectories, and event families/lineage, all loaded from cached
   Increment 4 products.
 - **Data and methods** — active source, climatology method and parameters,
-  tracking definitions, bilingual glossary, warnings, and limitations.
+  tracking definitions, geographic foundation, pre-built multidomain SST
+  status/maps/table, bilingual glossary, warnings, and limitations.
 - **Export** — diagnosis and cached product downloads using safe JSON/CSV
   serialization.
 
@@ -418,9 +501,9 @@ progressive disclosure changes presentation only, never calculations or data
 filters. Scientific briefs remain independently available in Spanish and
 English through the CLI (`--language es`, `--language en`, or `--language both`).
 
-The active SST calculation domain remains Niño 1+2. The Geographic Foundation
-defines overlays and future analysis domains only; multidomain SST and dynamic
-data refresh are not yet implemented.
+The detailed operational SST calculation domain remains Niño 1+2. The
+multidomain foundation is available as a separate cached, offline section;
+dynamic data refresh is not yet implemented.
 
 Cached Copernicus and synthetic modes are labelled explicitly. With real SST,
 the climatology priority is daily smoothed, then the explicit real monthly
@@ -436,6 +519,7 @@ remain available while anomaly-dependent products are disabled with a warning.
 | `project` | Public name and experimental-product label. |
 | `region` | Fixed Niño 1+2 longitude and latitude bounds. |
 | `geography` | Future display/analysis domains, standard Niño rectangles, the 60 nm coastal corridor, and map overlays. |
+| `sst` | Domain roles and paths, geography references, target resolutions, climatology status, regional-index coverage, aggregation safeguards, and multidomain outputs. |
 | `data` | Live/demo input priority, processed paths, SST aliases, and demo seed/length. |
 | `outputs` | Core map and daily diagnosis report paths. |
 | `logging` | Application and builder log level. |
@@ -819,8 +903,9 @@ Do not normalize the entire repository as part of an unrelated change.
 
 ## Scientific limitations
 
-- The product is experimental and limited to SST and derived thermal
-  indicators in Niño 1+2.
+- The product is experimental and limited to SST. Detailed derived thermal
+  indicators remain operational only in Niño 1+2; contextual domains currently
+  provide SST fields and daily regional mean SST without compatible anomalies.
 - Results depend on source-data quality, valid-area coverage, spatial
   resolution, climatology selection, sampling/smoothing windows, thresholds,
   and patch connectivity.

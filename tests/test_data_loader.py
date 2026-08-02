@@ -10,6 +10,7 @@ from src.data_loader import (
     find_sst_variable,
     load_active_sst_dataset,
     normalize_sst,
+    subset_geographic_bounds,
     subset_nino12,
 )
 
@@ -85,6 +86,41 @@ def test_nino12_subset_handles_both_longitude_conventions(
     np.testing.assert_array_equal(subset.longitude.values, expected)
     assert float(subset.longitude.min()) == -90.0
     assert float(subset.longitude.max()) == -80.0
+
+
+def test_generic_subset_is_inclusive_sorted_and_does_not_mutate_input() -> None:
+    source = xr.DataArray(
+        np.arange(15).reshape(3, 5),
+        dims=("lat", "lon"),
+        coords={"lat": [5.0, 0.0, -5.0], "lon": [190.0, 200.0, 210.0, 220.0, 230.0]},
+    )
+    original = source.copy(deep=True)
+    subset = subset_geographic_bounds(
+        source, longitude_bounds=(-160.0, -140.0), latitude_bounds=(-5.0, 5.0)
+    )
+    np.testing.assert_array_equal(subset.longitude, [-160.0, -150.0, -140.0])
+    np.testing.assert_array_equal(subset.latitude, [-5.0, 0.0, 5.0])
+    xr.testing.assert_identical(source, original)
+
+
+def test_generic_subset_rejects_missing_coordinates_and_no_overlap() -> None:
+    with pytest.raises(ValueError, match="latitude"):
+        subset_geographic_bounds(
+            xr.DataArray([1.0], dims="longitude", coords={"longitude": [-80.0]}),
+            longitude_bounds=(-90.0, -80.0),
+            latitude_bounds=(-10.0, 0.0),
+        )
+    data = xr.DataArray(
+        np.ones((2, 2)),
+        dims=("latitude", "longitude"),
+        coords={"latitude": [20.0, 21.0], "longitude": [20.0, 21.0]},
+    )
+    with pytest.raises(ValueError, match="overlap"):
+        subset_geographic_bounds(
+            data,
+            longitude_bounds=(-90.0, -80.0),
+            latitude_bounds=(-10.0, 0.0),
+        )
 
 
 def _daily_sst_dataset() -> xr.Dataset:

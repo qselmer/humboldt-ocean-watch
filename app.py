@@ -106,6 +106,23 @@ def load_download_file(path: str) -> bytes:
     return Path(path).read_bytes()
 
 
+@st.cache_data(show_spinner="Loading cached multidomain SST products…", max_entries=3)
+def load_multidomain_products(
+    status_path: str,
+    snapshot_path: str,
+    indices_path: str,
+    preview_path: str,
+    freshness: tuple[int, ...],
+) -> tuple[dict, dict, pd.DataFrame, bytes]:
+    """Read only pre-built local products; freshness participates in the cache key."""
+    del freshness
+    status = json.loads(Path(status_path).read_text(encoding="utf-8"))
+    snapshot = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
+    indices = pd.read_parquet(indices_path)
+    preview = Path(preview_path).read_bytes()
+    return status, snapshot, indices, preview
+
+
 @st.cache_resource(show_spinner="Preparing local geographic foundation…", max_entries=1)
 def load_geographic_foundation_resource():
     """Build local coastline geometry once without permitting downloads."""
@@ -788,6 +805,121 @@ with tabs[6]:
                 )
                 st.pyplot(geographic_figure, width="stretch")
                 plt.close(geographic_figure)
+
+    multidomain_details = st.expander(
+        "Multidomain SST foundation", expanded=False, on_change="rerun"
+    )
+    if tabs[6].open and multidomain_details.open:
+        with multidomain_details:
+            sst_outputs = config["sst"]["outputs"]
+            multidomain_paths = {
+                "status": resolve_project_path(sst_outputs["status"]),
+                "snapshot": resolve_project_path(sst_outputs["snapshot"]),
+                "indices": resolve_project_path(
+                    config["sst"]["regional_indices"]["output"]
+                ),
+                "preview": resolve_project_path(sst_outputs["preview_figure"]),
+            }
+            missing_products = [
+                str(path) for path in multidomain_paths.values() if not path.exists()
+            ]
+            if missing_products:
+                st.info(
+                    "The multidomain SST cache has not been built yet. Missing local products: "
+                    + ", ".join(missing_products)
+                )
+                st.code(
+                    "uv run python scripts\\generate_multidomain_demo_data.py --all\n"
+                    "uv run python scripts\\build_multidomain_sst_snapshot.py --allow-demo\n"
+                    "uv run python scripts\\preview_multidomain_sst.py",
+                    language="powershell",
+                )
+            else:
+                freshness = tuple(
+                    path.stat().st_mtime_ns for path in multidomain_paths.values()
+                )
+                try:
+                    multidomain_status, multidomain_snapshot, nino_indices, preview_bytes = (
+                        load_multidomain_products(
+                            str(multidomain_paths["status"]),
+                            str(multidomain_paths["snapshot"]),
+                            str(multidomain_paths["indices"]),
+                            str(multidomain_paths["preview"]),
+                            freshness,
+                        )
+                    )
+                except (OSError, ValueError, KeyError) as exc:
+                    st.warning(
+                        "Cached multidomain SST products could not be read. No rebuild or "
+                        f"download was attempted. Details: {exc}"
+                    )
+                else:
+                    domain_rows = []
+                    for domain_id, details in multidomain_status.get("domains", {}).items():
+                        dataset_details = details.get("dataset") or {}
+                        domain_rows.append(
+                            {
+                                "Domain": details.get("label", domain_id),
+                                "Status": details.get("status", "unknown"),
+                                "Latest date": details.get("latest_date"),
+                                "Source mode": details.get("source_mode"),
+                                "Source resolution (°)": dataset_details.get(
+                                    "longitude_resolution_degrees"
+                                ),
+                                "Target resolution (°)": details.get(
+                                    "target_resolution_degrees"
+                                ),
+                                "Climatology": (
+                                    "available"
+                                    if details.get("climatology_available")
+                                    else details.get("climatology_status", "unavailable")
+                                ),
+                            }
+                        )
+                    st.dataframe(pd.DataFrame(domain_rows), hide_index=True, width="stretch")
+                    st.image(
+                        preview_bytes,
+                        caption=(
+                            "Pre-built offline preview: Pacific context, Humboldt coastal SST, "
+                            "and daily Niño-region mean SST."
+                        ),
+                        width="stretch",
+                    )
+                    display_columns = [
+                        "date",
+                        "region_label",
+                        "mean_sst_c",
+                        "valid_coverage",
+                        "source_mode",
+                        "anomaly_status",
+                    ]
+                    st.dataframe(
+                        nino_indices.loc[:, [
+                            column for column in display_columns if column in nino_indices
+                        ]],
+                        hide_index=True,
+                        width="stretch",
+                        column_config={
+                            "mean_sst_c": st.column_config.NumberColumn(
+                                "Mean SST (°C)", format="%.2f"
+                            ),
+                            "valid_coverage": st.column_config.NumberColumn(
+                                "Valid coverage", format="percent"
+                            ),
+                        },
+                    )
+                    st.warning(
+                        "Niño 3.4 and Niño 3 anomalies are unavailable until compatible spatial "
+                        "and temporal climatologies are built. No official ENSO classification "
+                        "or ONI is calculated.",
+                        icon=":material/info:",
+                    )
+                    st.info(
+                        "The detailed operational calculations, events, patches, tracks, "
+                        "representativeness, and scientific briefs continue to use Niño 1+2."
+                    )
+                    if multidomain_snapshot.get("warnings"):
+                        st.caption("Cached warnings: " + "; ".join(multidomain_snapshot["warnings"]))
 
     with st.expander("Quality control", expanded=False):
         if qc_report:

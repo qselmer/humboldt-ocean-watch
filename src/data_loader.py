@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -21,6 +21,183 @@ NINO12_LONGITUDE_BOUNDS = (-90.0, -80.0)
 NINO12_LATITUDE_BOUNDS = (-10.0, 0.0)
 COPERNICUS_CACHED_MODE = "Copernicus cached data"
 SYNTHETIC_DEMO_MODE = "Synthetic demonstration data"
+
+LATITUDE_ALIASES = ("latitude", "lat")
+LONGITUDE_ALIASES = ("longitude", "lon")
+
+
+def _coordinate_alias(
+    data: xr.Dataset | xr.DataArray, aliases: Sequence[str], canonical: str
+) -> str:
+    matches = [name for name in aliases if name in data.coords]
+    if canonical in matches:
+        return canonical
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ValueError(f"Data is missing required coordinate: {canonical}")
+    raise ValueError(f"Ambiguous {canonical} coordinates: {matches}")
+
+
+def normalize_longitude_coordinates(
+    data: xr.Dataset | xr.DataArray,
+) -> xr.Dataset | xr.DataArray:
+    """Return an independent object with sorted -180..180 longitudes."""
+    longitude_name = _coordinate_alias(data, LONGITUDE_ALIASES, "longitude")
+    result = data.copy()
+    if longitude_name != "longitude":
+        result = result.rename({longitude_name: "longitude"})
+    values = np.asarray(result.longitude.values, dtype=float)
+    if values.ndim != 1 or not np.isfinite(values).all():
+        raise ValueError("Longitude coordinate must be one-dimensional and finite")
+    normalized = (values + 180.0) % 360.0 - 180.0
+    if np.unique(np.round(normalized, 12)).size != normalized.size:
+        raise ValueError("Longitude normalization creates duplicate coordinates")
+    return result.assign_coords(longitude=normalized).sortby("longitude")
+
+
+def normalize_latitude_coordinates(
+    data: xr.Dataset | xr.DataArray,
+) -> xr.Dataset | xr.DataArray:
+    """Return an independent object with a sorted canonical latitude coordinate."""
+    latitude_name = _coordinate_alias(data, LATITUDE_ALIASES, "latitude")
+    result = data.copy()
+    if latitude_name != "latitude":
+        result = result.rename({latitude_name: "latitude"})
+    values = np.asarray(result.latitude.values, dtype=float)
+    if values.ndim != 1 or not np.isfinite(values).all():
+        raise ValueError("Latitude coordinate must be one-dimensional and finite")
+    if np.unique(np.round(values, 12)).size != values.size:
+        raise ValueError("Latitude coordinate contains duplicates")
+    return result.sortby("latitude")
+
+
+def normalize_spatial_coordinates(
+    data: xr.Dataset | xr.DataArray,
+) -> xr.Dataset | xr.DataArray:
+    """Canonicalize longitude and latitude names, conventions, and ordering."""
+    return normalize_latitude_coordinates(normalize_longitude_coordinates(data))
+
+
+def validate_domain_overlap(
+    data: xr.Dataset | xr.DataArray,
+    longitude_bounds: tuple[float, float],
+    latitude_bounds: tuple[float, float],
+) -> None:
+    """Raise when a canonical data grid does not intersect requested bounds."""
+    if longitude_bounds[0] >= longitude_bounds[1] or latitude_bounds[0] >= latitude_bounds[1]:
+        raise ValueError("Geographic bounds must be finite and ordered")
+    if not np.isfinite((*longitude_bounds, *latitude_bounds)).all():
+        raise ValueError("Geographic bounds must be finite and ordered")
+    if (
+        float(data.longitude.max()) < longitude_bounds[0]
+        or float(data.longitude.min()) > longitude_bounds[1]
+        or float(data.latitude.max()) < latitude_bounds[0]
+        or float(data.latitude.min()) > latitude_bounds[1]
+    ):
+        raise ValueError("Dataset does not overlap the requested geographic domain")
+
+
+def subset_geographic_bounds(
+    data: xr.Dataset | xr.DataArray,
+    *,
+    longitude_bounds: tuple[float, float],
+    latitude_bounds: tuple[float, float],
+) -> xr.Dataset | xr.DataArray:
+    """Normalize and inclusively subset explicit non-antimeridian bounds."""
+    normalized = normalize_spatial_coordinates(data)
+    validate_domain_overlap(normalized, longitude_bounds, latitude_bounds)
+    subset = normalized.where(
+        (normalized.longitude >= longitude_bounds[0])
+        & (normalized.longitude <= longitude_bounds[1])
+        & (normalized.latitude >= latitude_bounds[0])
+        & (normalized.latitude <= latitude_bounds[1]),
+        drop=True,
+    )
+    if subset.sizes.get("longitude", 0) == 0 or subset.sizes.get("latitude", 0) == 0:
+        raise ValueError("Dataset has no grid-cell centres inside requested bounds")
+    return subset
+
+
+def resolve_domain_bounds(
+    domain: str | Any, config: Mapping[str, Any] | None = None
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Resolve bounds from an SSTDomainSpec or a configured domain ID."""
+    if hasattr(domain, "longitude_bounds") and hasattr(domain, "latitude_bounds"):
+        return tuple(domain.longitude_bounds), tuple(domain.latitude_bounds)
+    if config is None:
+        raise ValueError("config is required when resolving a domain ID")
+    from src.sst_domains import load_sst_domain_specs
+
+    registry = load_sst_domain_specs(config)
+    try:
+        spec = registry.domains[str(domain)]
+    except KeyError as exc:
+        raise ValueError(f"Unknown SST domain: {domain}") from exc
+    return spec.longitude_bounds, spec.latitude_bounds
+
+
+def _approximate_resolution(values: xr.DataArray) -> float | None:
+    coordinate = np.asarray(values.values, dtype=float)
+    if coordinate.size < 2:
+        return None
+    differences = np.diff(coordinate)
+    finite = np.abs(differences[np.isfinite(differences)])
+    return None if finite.size == 0 else float(np.median(finite))
+
+
+def describe_sst_dataset(dataset: xr.Dataset) -> dict[str, Any]:
+    """Describe a validated canonical SST dataset using JSON-safe values."""
+    validate_dataset(dataset)
+    latest = pd.to_datetime(dataset.time.values).max()
+    return {
+        "dimensions": {name: int(size) for name, size in dataset.sizes.items()},
+        "longitude_bounds": [float(dataset.longitude.min()), float(dataset.longitude.max())],
+        "latitude_bounds": [float(dataset.latitude.min()), float(dataset.latitude.max())],
+        "longitude_resolution_degrees": _approximate_resolution(dataset.longitude),
+        "latitude_resolution_degrees": _approximate_resolution(dataset.latitude),
+        "latest_observation_time": pd.Timestamp(latest).isoformat(),
+        "finite_value_count": int(np.isfinite(dataset.sst.values).sum()),
+        "units": dataset.sst.attrs.get("units"),
+    }
+
+
+def load_sst_domain_dataset(
+    path: str | Path,
+    domain_spec: Any,
+    *,
+    aliases: Sequence[str] = DEFAULT_SST_ALIASES,
+    source_mode: str,
+) -> xr.Dataset:
+    """Load, normalize, subset, validate, and annotate one configured SST domain."""
+    source = Path(path)
+    dataset = load_sst_dataset(source, aliases=aliases, create_demo_if_missing=False)
+    longitude_bounds, latitude_bounds = resolve_domain_bounds(domain_spec)
+    subset = subset_geographic_bounds(
+        dataset,
+        longitude_bounds=longitude_bounds,
+        latitude_bounds=latitude_bounds,
+    )
+    assert isinstance(subset, xr.Dataset)
+    validate_dataset(subset)
+    description = describe_sst_dataset(subset)
+    subset.attrs.update(
+        domain_id=str(domain_spec.domain_id),
+        source_path=str(source),
+        source_mode=source_mode,
+        requested_longitude_bounds=",".join(map(str, longitude_bounds)),
+        requested_latitude_bounds=",".join(map(str, latitude_bounds)),
+        effective_longitude_bounds=",".join(map(str, description["longitude_bounds"])),
+        effective_latitude_bounds=",".join(map(str, description["latitude_bounds"])),
+        approximate_longitude_resolution_degrees=(
+            description["longitude_resolution_degrees"] or "unknown"
+        ),
+        approximate_latitude_resolution_degrees=(
+            description["latitude_resolution_degrees"] or "unknown"
+        ),
+        latest_observation_time=description["latest_observation_time"],
+    )
+    return subset.sortby("time")
 
 
 def find_sst_variable(
@@ -74,30 +251,17 @@ def normalize_sst(dataset: xr.Dataset, variable: str) -> xr.Dataset:
 
 
 def subset_nino12(dataset: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArray:
-    """Subset Niño 1+2, accepting either common longitude convention.
-
-    Returned longitudes use the -180 to 180 convention and are sorted. Boolean
-    selection makes latitude ordering irrelevant.
-    """
-    missing = {"latitude", "longitude"} - set(dataset.coords)
-    if missing:
-        raise ValueError(f"Data is missing required coordinates: {sorted(missing)}")
-
-    longitude = dataset["longitude"]
-    normalized_longitude = (longitude + 180.0) % 360.0 - 180.0
-    normalized = dataset.assign_coords(longitude=normalized_longitude).sortby("longitude")
-    lon_min, lon_max = NINO12_LONGITUDE_BOUNDS
-    lat_min, lat_max = NINO12_LATITUDE_BOUNDS
-    in_region = normalized.where(
-        (normalized["longitude"] >= lon_min)
-        & (normalized["longitude"] <= lon_max)
-        & (normalized["latitude"] >= lat_min)
-        & (normalized["latitude"] <= lat_max),
-        drop=True,
-    )
-    if in_region.sizes.get("longitude", 0) == 0 or in_region.sizes.get("latitude", 0) == 0:
-        raise ValueError("Dataset does not overlap the Niño 1+2 study region")
-    return in_region
+    """Compatibility wrapper returning the canonical Niño 1+2 rectangle."""
+    try:
+        return subset_geographic_bounds(
+            dataset,
+            longitude_bounds=NINO12_LONGITUDE_BOUNDS,
+            latitude_bounds=NINO12_LATITUDE_BOUNDS,
+        )
+    except ValueError as exc:
+        if "overlap" in str(exc) or "grid-cell" in str(exc):
+            raise ValueError("Dataset does not overlap the Niño 1+2 study region") from exc
+        raise
 
 
 def validate_dataset(dataset: xr.Dataset) -> None:
