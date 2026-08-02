@@ -141,7 +141,7 @@ def test_native_non_streaming_request_uses_json_schema_and_no_tools() -> None:
     assert len(client.models.calls) == 1
     request = client.models.calls[0]
     assert set(request) == {"model", "contents", "config"}
-    assert request["model"] == "gemini-3.5-flash"
+    assert request["model"] == "gemini-3.1-flash-lite"
     native_config = request["config"]
     assert native_config.response_mime_type == "application/json"
     assert native_config.temperature == 0
@@ -613,7 +613,10 @@ def test_structural_failure_enters_exactly_one_same_provider_repair(tmp_path) ->
         llm_provider=provider,
     )
     assert len(client.models.calls) == 2
-    assert all(call["model"] == "gemini-3.5-flash" for call in client.models.calls)
+    assert all(
+        call["model"] == "gemini-3.1-flash-lite"
+        for call in client.models.calls
+    )
     assert artifacts.generations["en"].metadata.repair_count == 1
     assert artifacts.generations["en"].metadata.generation_call_count == 2
     assert "invalid_section_type" in client.models.calls[1]["contents"]
@@ -652,7 +655,8 @@ def test_json_mode_repairs_missing_operational_fact_coverage_once(tmp_path) -> N
 
     assert len(client.models.calls) == 2
     assert all(
-        call["model"] == "gemini-3.5-flash" for call in client.models.calls
+        call["model"] == "gemini-3.1-flash-lite"
+        for call in client.models.calls
     )
     assert all(
         not hasattr(call["config"], "response_json_schema")

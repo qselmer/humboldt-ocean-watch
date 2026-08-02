@@ -111,7 +111,7 @@ def test_all_preflight_checks_pass_with_small_fake_calls(monkeypatch, tmp_path) 
     assert data["basic_generation_available"] is True
     assert data["structured_generation_available"] is True
     assert data["output_directory_writable"] is True
-    assert client.models.get_calls == [{"model": "gemini-3.5-flash"}]
+    assert client.models.get_calls == [{"model": "gemini-3.1-flash-lite"}]
     assert len(client.models.generate_calls) == 2
     assert all(
         call["config"].automatic_function_calling.disable is True

@@ -45,7 +45,7 @@ def test_gemini_configuration_and_environment_overrides(monkeypatch) -> None:
     ):
         monkeypatch.delenv(name, raising=False)
     resolved = resolve_provider_settings("gemini", None, None, settings())
-    assert resolved.model_name == "gemini-3.5-flash"
+    assert resolved.model_name == "gemini-3.1-flash-lite"
     assert resolved.local_generation is False
     assert resolved.request_timeout_seconds == 300
     assert resolved.num_predict == 3500

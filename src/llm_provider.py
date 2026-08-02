@@ -12,7 +12,7 @@ from src.llm_errors import LLMConfigurationError, LLMProviderError
 
 
 DEFAULT_PROVIDER = "gemini"
-DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_OLLAMA_MODEL = "qwen3:4b"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 
