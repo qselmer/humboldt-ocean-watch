@@ -15,6 +15,7 @@ validated locally by Python; they do not calculate the scientific metrics.
 ## Table of contents
 
 - [Main capabilities](#main-capabilities)
+- [Geographic foundation](#geographic-foundation)
 - [System architecture](#system-architecture)
 - [Repository structure](#repository-structure)
 - [End-to-end workflow](#end-to-end-workflow)
@@ -67,6 +68,53 @@ validated locally by Python; they do not calculate the scientific metrics.
 
 The implemented scope is thermal. Chlorophyll, currents, forecasts, and
 climate-change attribution are intentionally outside the current project.
+
+## Geographic foundation
+
+Increment 6A adds a validated geographic registry without changing the active
+scientific calculation domain. The foundation defines four geographic scopes:
+
+- **Pacific context**: the display and future broad-analysis domain
+  (170°W–70°W, 45°S–10°N).
+- **Humboldt coastal system**: a future high-resolution analysis domain
+  (85°W–70°W, 45°S–2°N).
+- **South Pacific High diagnostic domain**: a diagnostic, not official,
+  atmospheric domain (120°W–70°W, 45°S–15°S).
+- **Niño 1+2**: the unchanged active scientific domain
+  (90°W–80°W, 10°S–0°), retained in the legacy `region` block.
+
+Niño 3.4, Niño 3, and Niño 1+2 are represented as deterministic
+rectangles. A Humboldt coastal corridor is defined geodesically from 2°N to
+45°S with a maximum offshore distance of 60 nautical miles (111.12 km),
+measured only from the continental Pacific coastline of Ecuador, Peru, and
+Chile. Islands, archipelagos, and islets are excluded as buffer sources. The
+complete land geometry, including islands, remains an exclusion mask, so land
+inside the mainland-derived corridor appears as a hole rather than extending
+the corridor. The corridor is a diagnostic geographic definition, not a
+political or official jurisdiction. It is generated only when complete local
+coastline and land geometry are available; the application never downloads
+Natural Earth automatically.
+
+Generate the offline foundation preview with:
+
+```powershell
+uv run python scripts\preview_geographic_foundation.py `
+  --config config.yaml `
+  --output outputs\figures\geographic_foundation_preview.png `
+  --overwrite
+```
+
+Current SST, climatology, event, patch, and track calculations remain
+restricted to Niño 1+2. The planned sequence is:
+
+1. Increment 6A — Geographic foundation
+2. Increment 6B — English advanced interface
+3. Increment 6C — Multidomain SST
+4. Increment 6D — Dynamic SST refresh
+5. Increment 7A — South Pacific High
+6. Increment 7B — Atmospheric climatology
+7. Increment 8 — Ecosystem products
+8. Increment 9 — Multivariate integration
 
 ## System architecture
 
@@ -146,6 +194,7 @@ humboldt-ocean-watch/
 | `build_univariate_events.py` | Detects configured time-series threshold events and writes event, flag, and summary products. |
 | `build_daily_patches.py` | Identifies and characterizes date-local connected thermal patches. |
 | `build_spatiotemporal_tracks.py` | Links cached daily patches into lineage edges, tracks, and event families. |
+| `preview_geographic_foundation.py` | Validates and renders the offline multidomain geographic foundation without downloading coastlines. |
 | `build_brief_context.py` | Assembles an offline, provenance-aware, validated context from cached analytical products. |
 | `validate_brief_context.py` | Validates an existing context JSON without contacting a provider. |
 | `check_llm_access.py` | Runs an explicit provider-neutral Gemini, Ollama, or OpenAI access preflight. |
@@ -379,6 +428,7 @@ remain available while anomaly-dependent products are disabled with a warning.
 | --- | --- |
 | `project` | Public name and experimental-product label. |
 | `region` | Fixed Niño 1+2 longitude and latitude bounds. |
+| `geography` | Future display/analysis domains, standard Niño rectangles, the 60 nm coastal corridor, and map overlays. |
 | `data` | Live/demo input priority, processed paths, SST aliases, and demo seed/length. |
 | `outputs` | Core map and daily diagnosis report paths. |
 | `logging` | Application and builder log level. |

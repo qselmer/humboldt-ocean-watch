@@ -23,6 +23,9 @@ from src.data_loader import load_active_sst_dataset
 from src.event_dashboard import render_thermal_events_tab
 from src.event_data_loader import load_event_products
 from src.export_utils import dumps_json_safe
+from src.geographic_foundation import prepare_geographic_foundation
+from src.geographic_overlays import plot_geographic_foundation
+from src.geography import load_geography_registry
 from src.help_content import (
     glossary,
     metric_tooltip,
@@ -96,6 +99,12 @@ def load_analytics_products() -> tuple[pd.DataFrame, dict]:
 @st.cache_data(show_spinner=False, max_entries=10)
 def load_download_file(path: str) -> bytes:
     return Path(path).read_bytes()
+
+
+@st.cache_resource(show_spinner="Preparing local geographic foundation…", max_entries=1)
+def load_geographic_foundation_resource():
+    """Build local coastline geometry once without permitting downloads."""
+    return prepare_geographic_foundation(config)
 
 
 dataset, data_mode, climatology, climatology_method, climatology_warning = load_operational_data()
@@ -581,6 +590,67 @@ with tabs[6]:
             if climatology is not None else "not_calculated"
         ),
     })
+    st.markdown("#### Geographic foundation")
+    geography_registry = load_geography_registry(config)
+    st.info(
+        "The geographic foundation defines the future multidomain scope. Current "
+        "scientific calculations remain restricted to the existing Niño 1+2 domain "
+        "until the multidomain SST increment is implemented."
+    )
+    st.caption(
+        "60-nautical-mile corridor measured from the continental Pacific coastline "
+        "of Ecuador, Peru, and Chile. Islands do not generate independent buffers."
+    )
+    st.write({
+        "Pacific context bounds": geography_registry.display_domain.bounds.to_dict(),
+        "Humboldt coastal bounds": geography_registry.analysis_domains[
+            "humboldt_coastal"
+        ].bounds.to_dict(),
+        "South Pacific High diagnostic domain bounds": geography_registry.analysis_domains[
+            "south_pacific_high"
+        ].bounds.to_dict(),
+        "60 nm corridor specification": geography_registry.coastal_corridors[
+            "humboldt_60nm"
+        ].to_dict(),
+    })
+    nino_region_rows = [
+        {
+            "Region": region.label,
+            "Internal ID": region.id,
+            "Longitude": f"{region.bounds.west:g} to {region.bounds.east:g}",
+            "Latitude": f"{region.bounds.south:g} to {region.bounds.north:g}",
+            "Geometry": region.geometry_type,
+        }
+        for region in geography_registry.standard_regions.values()
+    ]
+    st.dataframe(pd.DataFrame(nino_region_rows), hide_index=True, width="stretch")
+    if tabs[6].open:
+        try:
+            geographic_foundation = load_geographic_foundation_resource()
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            st.warning(
+                "The local geographic foundation could not be prepared. No download "
+                f"was attempted. Details: {exc}"
+            )
+        else:
+            st.write({
+                "Coastline source status": geographic_foundation.source_status.to_dict(),
+                "Coastal corridor geometry status": geographic_foundation.corridor_status,
+            })
+            for warning in geographic_foundation.warnings:
+                st.warning(warning)
+            geographic_figure = plot_geographic_foundation(
+                geographic_foundation.registry,
+                local_geometries=geographic_foundation.local_geometries,
+                corridor=geographic_foundation.corridor,
+                source_status=geographic_foundation.source_status,
+            )
+            st.pyplot(geographic_figure, width="stretch")
+            plt.close(geographic_figure)
+    else:
+        st.caption(
+            "Open Data and methods to load the cached local coastline and geographic preview."
+        )
     st.markdown("#### Increment 4 event definitions")
     st.write({
         "univariate_events": {

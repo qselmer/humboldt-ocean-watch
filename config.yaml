@@ -6,6 +6,72 @@ region:
   longitude: [-90.0, -80.0]
   latitude: [-10.0, 0.0]
 
+# Increment 6A geographic registry. The legacy ``region`` block above remains
+# the only scientific calculation domain until multidomain SST is implemented.
+geography:
+  coordinate_convention: "-180_to_180"
+
+  display_domain:
+    id: pacific_context
+    label: Pacific context
+    longitude: [-170.0, -70.0]
+    latitude: [-45.0, 10.0]
+
+  analysis_domains:
+    pacific_context:
+      label: Pacific context
+      longitude: [-170.0, -70.0]
+      latitude: [-45.0, 10.0]
+      target_resolution_degrees: 0.25
+    humboldt_coastal:
+      label: Humboldt coastal system
+      longitude: [-85.0, -70.0]
+      latitude: [-45.0, 2.0]
+      target_resolution_degrees: 0.05
+    south_pacific_high:
+      label: South Pacific High diagnostic domain
+      longitude: [-120.0, -70.0]
+      latitude: [-45.0, -15.0]
+      target_resolution_degrees: 0.25
+
+  standard_regions:
+    nino34:
+      label: Niño 3.4
+      aliases: [nino34, nino_3_4]
+      geometry_type: rectangle
+      longitude: [-170.0, -120.0]
+      latitude: [-5.0, 5.0]
+    nino3:
+      label: Niño 3
+      aliases: [nino3, nino_3]
+      geometry_type: rectangle
+      longitude: [-150.0, -90.0]
+      latitude: [-5.0, 5.0]
+    nino12:
+      label: Niño 1+2
+      aliases: [nino12, nino_1_2, nino1_2, nino_1plus2, nino1plus2, "nino1.2"]
+      geometry_type: rectangle
+      longitude: [-90.0, -80.0]
+      latitude: [-10.0, 0.0]
+
+  coastal_corridors:
+    humboldt_60nm:
+      label: Humboldt coastal corridor — 60 nautical miles
+      geometry_type: geodesic_coastal_buffer
+      source_coastline: south_america_pacific_mainland
+      coastline_type: continental_mainland_only
+      include_islands: false
+      latitude_range: [-45.0, 2.0]
+      buffer_distance_nm: 60.0
+      buffer_distance_km: 111.12
+      ocean_only: true
+
+  map_overlays:
+    show_standard_regions: true
+    show_analysis_domains: true
+    show_coastal_corridor: true
+    show_labels: true
+
 data:
   live_path: data/live/nino12_sst_nrt.nc
   demo_path: data/demo/synthetic_sst_daily.nc
