@@ -177,3 +177,137 @@ event_dashboard:
   show_patch_centroids_default: true
   show_anomaly_background_default: true
   show_family_tracks_default: true
+
+brief_context:
+  schema_version: "1.0.0"
+  output_directory: outputs/briefs
+  default_analysis_date: latest
+  strict_validation: true
+  maximum_payload_kb: 150
+  recent_windows_days:
+    - 1
+    - 7
+    - 15
+    - 30
+  maximum_top_patches: 5
+  maximum_top_tracks: 5
+  maximum_top_families: 3
+  stable_change_thresholds:
+    mean_sst_c: 0.10
+    mean_anomaly_c: 0.10
+    warm_area_fraction: 0.02
+    valid_coverage: 0.02
+    centroid_latitude_degrees: 0.10
+    centroid_longitude_degrees: 0.10
+  minimum_valid_coverage: 0.80
+  include_internal_ids: true
+  include_provenance: true
+  include_bilingual_labels: true
+
+brief_generation:
+  enabled: true
+  provider: gemini
+  providers:
+    gemini:
+      model: gemini-3.5-flash
+      require_api_key: true
+      api_key_environment_variable: GEMINI_API_KEY
+      local_generation: false
+      structured_output_mode: json
+      temperature: 0
+      maximum_output_tokens: 3500
+      request_timeout_seconds: 300
+      maximum_transport_attempts: 3
+      retry_initial_seconds: 15
+      retry_maximum_seconds: 60
+      maximum_repair_attempts: 1
+      use_tools: false
+      use_search_grounding: false
+      include_thoughts: false
+      approximate_bytes_per_token: 3.0
+      context_warning_fraction: 0.80
+    ollama:
+      model: qwen3:4b
+      base_url: http://localhost:11434
+      require_api_key: false
+      local_generation: true
+      temperature: 0
+      think: false
+      num_ctx: 65536
+      num_predict: 3500
+      keep_alive: 5m
+      structured_output_mode: json
+      attempt_provider_schema: false
+      request_timeout_seconds: 600
+      maximum_repair_attempts: 1
+      approximate_bytes_per_token: 3.0
+      context_warning_fraction: 0.80
+    openai:
+      model: gpt-5.6
+      require_api_key: true
+      local_generation: false
+      reasoning_effort: medium
+      text_verbosity: medium
+      store: false
+      maximum_output_tokens: 3500
+      maximum_repair_attempts: 1
+  default_language: both
+  maximum_generation_attempts: 2
+  retry_initial_seconds: 2
+  retry_maximum_seconds: 20
+  executive_summary_max_words: 180
+  section_max_words: 220
+  key_message_max_words: 45
+  maximum_key_messages: 5
+  require_context_validation: true
+  require_output_validation: true
+  require_cross_language_consistency: true
+  allow_tools: false
+  allow_web_search: false
+  allow_external_knowledge: false
+  preserve_previous_valid_outputs: true
+  context_schema_version: "1.0.0"
+  maximum_context_payload_kb: 150
+  minimum_valid_coverage: 0.80
+  output_directory: outputs/briefs
+  debug_directory: outputs/briefs/debug
+  prohibited_claim_patterns:
+    official_classification:
+      - "clasificacion oficial"
+      - "official classification"
+    forecast:
+      - "\\bforecast"
+      - "\\bpredict"
+      - "\\bwill\\b"
+      - "expected to"
+      - "\\bpronostic"
+      - "\\bpredec"
+      - "se espera que"
+    causal_attribution:
+      - "caused by"
+      - "due to"
+      - "driven by"
+      - "causad[oa] por"
+      - "debido a"
+    biological_fisheries_impact:
+      - "(?:biological|fishery|fisheries|ecosystem) impact"
+      - "impacto (?:biologico|pesquero|ecosistemico)"
+    economic_social_impact:
+      - "economic impact"
+      - "social impact"
+      - "impacto economico"
+      - "impacto social"
+    confidence_probability:
+      - "confidence probability"
+      - "probability of"
+      - "probabilidad de"
+    track_water_parcel:
+      - "tracks? (?:are|represent) (?:individual )?(?:water parcels?|water masses?)"
+      - "tracks? (?:son|representan) (?:parcelas|masas) (?:individuales )?de agua"
+    ordinal_representativeness:
+      - "representativeness (?:severity|ranking)"
+      - "severidad de representatividad"
+    external_reference:
+      - "https?://"
+      - "\\bdoi\\s*:"
+      - "\\[[0-9]+\\]"

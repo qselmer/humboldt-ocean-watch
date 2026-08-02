@@ -26,3 +26,5 @@ outputs/analytics/*
 !data/processed/.gitkeep
 !outputs/figures/.gitkeep
 !outputs/reports/.gitkeep
+
+outputs/briefs/debug/
