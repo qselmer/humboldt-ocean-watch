@@ -13,6 +13,20 @@ from src.ollama_client import OllamaProvider, build_ollama_request, normalize_ol
 from tests.scientific_brief_test_data import generation_settings, valid_brief, validated_context
 
 
+@pytest.fixture(autouse=True)
+def _isolate_ollama_environment(monkeypatch) -> None:
+    """Keep ambient production provider settings out of client unit tests."""
+    for variable in (
+        "LLM_PROVIDER",
+        "OLLAMA_MODEL",
+        "OLLAMA_BASE_URL",
+        "OLLAMA_NUM_CTX",
+        "OLLAMA_REQUEST_TIMEOUT_SECONDS",
+        "OLLAMA_STRUCTURED_OUTPUT_MODE",
+    ):
+        monkeypatch.delenv(variable, raising=False)
+
+
 class FakeOllamaClient:
     def __init__(self, responses):
         self.responses = list(responses)
