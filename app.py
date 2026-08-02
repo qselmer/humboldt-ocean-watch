@@ -42,7 +42,12 @@ from src.representativeness import (
     classify_representativeness,
 )
 from src.temporal_metrics import build_metrics_table
-from src.sidebar_manual import is_advanced, render_first_use, render_help_sidebar
+from src.sidebar_manual import (
+    INTERFACE_LANGUAGE,
+    migrate_legacy_interface_state,
+    render_dashboard_guide,
+    render_first_use,
+)
 from src.utils import configure_logging, load_config, resolve_project_path
 
 st.set_page_config(page_title="Humboldt Ocean Watch", page_icon=":material/waves:", layout="wide")
@@ -115,37 +120,35 @@ representativeness_thresholds = RepresentativenessThresholds.from_mapping(
 )
 dates = available_dates(dataset)
 
+migrate_legacy_interface_state(st.session_state)
 active_main_tab = st.session_state.get("main_dashboard_tab", "Overview")
-language, view_mode = render_help_sidebar(config, active_main_tab)
-advanced_mode = is_advanced(view_mode)
+language = INTERFACE_LANGUAGE
 
 with st.sidebar:
-    st.header(tr("diagnosis_controls", language), anchor=False)
+    st.header("Analysis controls", anchor=False)
     analysis_date = st.selectbox(
-        tr("analysis_date", language), dates, index=len(dates) - 1,
+        "Analysis date", dates, index=len(dates) - 1,
         key="diagnosis_analysis_date",
     )
-    detail_context = (
-        st.container()
-        if advanced_mode
-        else st.expander(tr("advanced_diagnostics", language), expanded=False)
-    )
-    with detail_context:
+    with st.expander("Advanced calculation settings", expanded=False):
         period_choice = st.selectbox(
-            tr("time_series_period", language), [30, 90, 180, "All"],
+            "Time-series window", [30, 90, 180, "All"],
             index=1, key="diagnosis_period",
         )
         anomaly_threshold = st.slider(
-            tr("anomaly_threshold", language), 0.5, 5.0, 2.0, 0.5,
+            "Warm-anomaly threshold (°C)", 0.5, 5.0, 2.0, 0.5,
             key="diagnosis_anomaly_threshold",
         )
         persistence_window = st.segmented_control(
-            tr("persistence_window", language), [7, 15, 30],
+            "Persistence window", [7, 15, 30],
             default=7, key="diagnosis_persistence_window",
-            format_func=lambda value: f"{value} {'días' if language == 'es' else 'days'}",
+            format_func=lambda value: f"{value} days",
         )
-    st.caption(f"{tr('active_mode', language)}: {data_mode}")
-    st.caption(f"{tr('climatology', language)}: {climatology_method or 'Unavailable'}")
+    st.markdown("**Data status**")
+    st.caption(f"Active data source: {data_mode}")
+    st.caption(f"Climatology method: {climatology_method or 'Unavailable'}")
+
+render_dashboard_guide(active_main_tab)
 
 fields, diagnosis = diagnose_date(
     dataset,
@@ -208,7 +211,7 @@ st.caption(
     else f"Climatology status: {climatology_method or 'unavailable'}"
 )
 
-render_first_use(language, view_mode)
+render_first_use()
 tab_labels = [
     "Overview", "Maps", "Time series", "Spatial behaviour",
     "Quality and representativeness", "Thermal events", "Data and methods", "Export",
@@ -236,6 +239,38 @@ def display_class(value: str | None) -> str:
     return human_label(value, language) if value else tr("unavailable", language)
 
 
+def render_cached_download(
+    label: str,
+    configured_path: str | Path,
+    *,
+    key: str,
+) -> None:
+    """Render a local cached-product download or a clear unavailable state."""
+    local_path = resolve_project_path(configured_path)
+    mime_types = {
+        ".csv": "text/csv",
+        ".json": "application/json",
+        ".nc": "application/x-netcdf",
+        ".parquet": "application/octet-stream",
+        ".md": "text/markdown",
+    }
+    if local_path.exists() and local_path.is_file():
+        st.download_button(
+            label,
+            data=load_download_file(str(local_path)),
+            file_name=local_path.name,
+            mime=mime_types.get(local_path.suffix.lower(), "application/octet-stream"),
+            key=key,
+        )
+    else:
+        st.button(
+            label,
+            disabled=True,
+            key=f"{key}_unavailable",
+            help=f"Cached product is unavailable: {local_path}",
+        )
+
+
 with tabs[0]:
     st.subheader(f"Regional overview · {analysis_date}")
     if not selected_representativeness.empty:
@@ -253,6 +288,7 @@ with tabs[0]:
         current_mean_anomaly = metrics["mean_sst_anomaly_c"]
     warm_area_fraction = current_representativeness_metrics.get("warm_area_fraction")
     with st.container(horizontal=True):
+        st.metric("Analysis date", str(analysis_date), border=True)
         st.metric(tr("representativeness_class", language), display_class(current_class), border=True)
         st.metric(
             tr("valid_coverage", language), display_fraction(current_coverage),
@@ -274,9 +310,30 @@ with tabs[0]:
     )
     st.markdown(f"**{tr('regional_interpretation', language)}**")
     st.info(interpret_representativeness(analysis_date, interpretation_source, language))
-    st.caption(representativeness_notes(language))
+    st.caption(
+        "This deterministic interpretation summarizes cached measurements; it is not a forecast, "
+        "causal attribution, or official Coastal El Niño classification."
+    )
+    with st.expander("Evidence and supporting diagnostics", expanded=False):
+        st.write({
+            "Mean SST": display_value(metrics.get("mean_sst_c"), "°C"),
+            "Maximum anomaly": display_value(metrics.get("maximum_anomaly_c"), "°C", True),
+            "90th-percentile anomaly": display_value(metrics.get("p90_anomaly_c"), "°C", True),
+            "Data mode": data_mode,
+            "Climatology method": climatology_method or "Unavailable",
+        })
+    with st.expander("How to interpret these indicators", expanded=False):
+        st.write(representativeness_notes(language))
+        st.write(
+            "Read the anomaly together with valid coverage and representativeness. A regional mean "
+            "can conceal spatial contrasts even when its numerical value is valid."
+        )
 
 with tabs[1]:
+    st.info(
+        "Maps show complementary dimensions of the current thermal state. They should be "
+        "interpreted together rather than as interchangeable indicators."
+    )
     map_specs = [
         ("Current SST", "sst_current", "SST (°C)", "turbo", 18.0, 32.0),
         ("SST anomaly", "sst_anomaly", "Anomaly (°C)", "RdBu_r", -5.0, 5.0),
@@ -303,6 +360,12 @@ with tabs[1]:
                     )
                     st.pyplot(fig, width="stretch")
                     plt.close(fig)
+    with st.expander("Map interpretation and limitations", expanded=False):
+        st.write(
+            "All maps use the fixed Niño 1+2 extent and comparable color limits between dates. "
+            "White cells may represent land or unavailable data. Persistence is a fraction, while "
+            "SST, anomaly, z-score, and daily change describe different quantities."
+        )
 
 with tabs[2]:
     st.subheader("Regional time series")
@@ -326,16 +389,22 @@ with tabs[2]:
                 st.info(f"No finite values are available for {title.lower()}.")
             else:
                 st.altair_chart(chart, width="stretch")
-        centroid_columns = st.columns(2)
-        for column, coordinate in zip(centroid_columns, ("latitude", "longitude"), strict=True):
-            with column.container(border=True):
-                chart = centroid_temporal_chart(
-                    series, coordinate=coordinate, selected_date=analysis_date
-                )
-                if chart is None:
-                    st.info(f"No finite centroid {coordinate} values are available.")
-                else:
-                    st.altair_chart(chart, width="stretch")
+        with st.expander("Centroid diagnostics", expanded=False):
+            centroid_columns = st.columns(2)
+            for column, coordinate in zip(centroid_columns, ("latitude", "longitude"), strict=True):
+                with column.container(border=True):
+                    chart = centroid_temporal_chart(
+                        series, coordinate=coordinate, selected_date=analysis_date
+                    )
+                    if chart is None:
+                        st.info(f"No finite centroid {coordinate} values are available.")
+                    else:
+                        st.altair_chart(chart, width="stretch")
+        with st.expander("Detailed temporal metrics and window definitions", expanded=False):
+            st.write(
+                f"Visible window: {period_choice}. Seven-day means use cached daily observations; "
+                "missing dates are not treated as valid observations."
+            )
 
 with tabs[3]:
     if climatology is None:
@@ -362,29 +431,34 @@ with tabs[3]:
             else:
                 st.pyplot(fig, width="stretch")
                 plt.close(fig)
-        profile_left, profile_right = st.columns(2)
-        with profile_left.container(border=True):
-            st.subheader("Latitude anomaly profile")
-            chart = profile_chart(
-                fields.latitude_anomaly_profile,
-                coordinate="latitude",
-                title="Zonal-mean SST anomaly",
-            )
-            if chart is None:
-                st.info("No finite latitude-profile values are available.")
-            else:
-                st.altair_chart(chart, width="stretch")
-        with profile_right.container(border=True):
-            st.subheader("Longitude anomaly profile")
-            chart = profile_chart(
-                fields.longitude_anomaly_profile,
-                coordinate="longitude",
-                title="Meridional-mean SST anomaly",
-            )
-            if chart is None:
-                st.info("No finite longitude-profile values are available.")
-            else:
-                st.altair_chart(chart, width="stretch")
+        st.info(
+            "Persistence indicates repeated threshold exceedance; the centroid summarizes the "
+            "location of warm-anomaly area and does not track an individual water parcel."
+        )
+        with st.expander("Spatial diagnostic details", expanded=False):
+            profile_left, profile_right = st.columns(2)
+            with profile_left.container(border=True):
+                st.subheader("Latitude anomaly profile")
+                chart = profile_chart(
+                    fields.latitude_anomaly_profile,
+                    coordinate="latitude",
+                    title="Zonal-mean SST anomaly",
+                )
+                if chart is None:
+                    st.info("No finite latitude-profile values are available.")
+                else:
+                    st.altair_chart(chart, width="stretch")
+            with profile_right.container(border=True):
+                st.subheader("Longitude anomaly profile")
+                chart = profile_chart(
+                    fields.longitude_anomaly_profile,
+                    coordinate="longitude",
+                    title="Meridional-mean SST anomaly",
+                )
+                if chart is None:
+                    st.info("No finite longitude-profile values are available.")
+                else:
+                    st.altair_chart(chart, width="stretch")
 
 with tabs[4]:
     st.subheader(tr("quality_representativeness", language))
@@ -420,7 +494,7 @@ with tabs[4]:
             st.markdown(f"**{tr('triggered_rule', language)}**")
             triggered_rule = str(representative_row["triggered_rule"])
             st.write(human_label(triggered_rule, language))
-            if advanced_mode:
+            with st.expander("Technical identifiers", expanded=False):
                 st.caption(f"{tr('internal_id', language)}: {triggered_rule}")
 
         st.markdown("**Main input metrics**")
@@ -559,165 +633,266 @@ with tabs[5]:
         representativeness=representativeness_table,
         anomaly=fields["sst_anomaly"] if "sst_anomaly" in fields else None,
         project_root=Path.cwd(),
-        language=language,
-        view_mode=view_mode,
-        show_internal_ids=bool(config["interface"]["show_internal_ids"]),
     )
 
 with tabs[6]:
-    st.subheader(tr("data_methods", language))
-    st.write({
-        "active_mode": data_mode,
-        "source": dataset.attrs.get("source_path"),
-        "available_period": f"{dates[0]} to {dates[-1]}",
-        "study_region": "90–80°W, 10°S–0°",
-        "temperature_units": dataset.sst.attrs.get("units"),
-        "climatology_method": climatology_method or "Unavailable",
-        "climatology_reference_period": (
-            f"{config['climatology']['reference_start']}–{config['climatology']['reference_end']}"
-        ),
-        "daily_sampling_half_window_days": config["climatology"]["sampling_half_window_days"],
-        "daily_smoothing_window_days": config["climatology"]["smoothing_window_days"],
-        "fallback_method": config["climatology"]["fallback_method"],
-        "leap_day_method": (
-            climatology.attrs.get("leap_day_method", "Not applicable to monthly fallback")
-            if climatology is not None else "Unavailable"
-        ),
-        "active_climatology_file": diagnosis.get("climatology_file"),
-        "climatology_fallback_used": diagnosis.get("climatology_fallback_used", False),
-        "percentile_calculation_state": (
-            climatology.attrs.get("percentile_calculation_state", "not applicable")
-            if climatology is not None else "not_calculated"
-        ),
-    })
-    st.markdown("#### Geographic foundation")
-    geography_registry = load_geography_registry(config)
-    st.info(
-        "The geographic foundation defines the future multidomain scope. Current "
-        "scientific calculations remain restricted to the existing Niño 1+2 domain "
-        "until the multidomain SST increment is implemented."
+    st.subheader("Data and methods")
+    st.warning(
+        "Experimental thermal-monitoring product. It is not an official ENSO or Coastal El Niño "
+        "classification, a forecast, or a causal attribution.",
+        icon=":material/science:",
     )
-    st.caption(
-        "60-nautical-mile corridor measured from the continental Pacific coastline "
-        "of Ecuador, Peru, and Chile. Islands do not generate independent buffers."
-    )
-    st.write({
-        "Pacific context bounds": geography_registry.display_domain.bounds.to_dict(),
-        "Humboldt coastal bounds": geography_registry.analysis_domains[
-            "humboldt_coastal"
-        ].bounds.to_dict(),
-        "South Pacific High diagnostic domain bounds": geography_registry.analysis_domains[
-            "south_pacific_high"
-        ].bounds.to_dict(),
-        "60 nm corridor specification": geography_registry.coastal_corridors[
-            "humboldt_60nm"
-        ].to_dict(),
-    })
-    nino_region_rows = [
-        {
-            "Region": region.label,
-            "Internal ID": region.id,
-            "Longitude": f"{region.bounds.west:g} to {region.bounds.east:g}",
-            "Latitude": f"{region.bounds.south:g} to {region.bounds.north:g}",
-            "Geometry": region.geometry_type,
-        }
-        for region in geography_registry.standard_regions.values()
-    ]
-    st.dataframe(pd.DataFrame(nino_region_rows), hide_index=True, width="stretch")
-    if tabs[6].open:
-        try:
-            geographic_foundation = load_geographic_foundation_resource()
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            st.warning(
-                "The local geographic foundation could not be prepared. No download "
-                f"was attempted. Details: {exc}"
-            )
-        else:
-            st.write({
-                "Coastline source status": geographic_foundation.source_status.to_dict(),
-                "Coastal corridor geometry status": geographic_foundation.corridor_status,
-            })
-            for warning in geographic_foundation.warnings:
-                st.warning(warning)
-            geographic_figure = plot_geographic_foundation(
-                geographic_foundation.registry,
-                local_geometries=geographic_foundation.local_geometries,
-                corridor=geographic_foundation.corridor,
-                source_status=geographic_foundation.source_status,
-            )
-            st.pyplot(geographic_figure, width="stretch")
-            plt.close(geographic_figure)
-    else:
+
+    with st.expander("Active data and coverage", expanded=True):
+        st.write({
+            "Active data source": data_mode,
+            "Source file": dataset.attrs.get("source_path"),
+            "Available period": f"{dates[0]} to {dates[-1]}",
+            "Active study region": "90–80°W, 10°S–0° (Niño 1+2)",
+            "Temperature units": dataset.sst.attrs.get("units"),
+            "Valid coverage on selected date": display_value(
+                diagnosis["metrics"].get("valid_data_coverage_percent"), "%"
+            ),
+        })
         st.caption(
-            "Open Data and methods to load the cached local coastline and geographic preview."
+            "Dates are read from the NetCDF time coordinate, never from global "
+            "time-coverage attributes."
         )
-    st.markdown("#### Increment 4 event definitions")
-    st.write({
-        "univariate_events": {
-            "source_series": config["event_detection"].get("source_metric"),
-            "threshold_type": config["event_detection"]["threshold_type"],
-            "fixed_threshold": config["event_detection"].get("fixed_anomaly_threshold_c"),
-            "minimum_duration_days": config["event_detection"]["minimum_duration_days"],
-            "allowed_interruptions_days": config["event_detection"]["allowed_gap_days"],
-            "maximum_calendar_gap_days": config["event_detection"]["maximum_calendar_gap_days"],
-        },
-        "daily_patches": {
-            "source_variable": config["patch_detection"]["source_variable"],
-            "direction": config["patch_detection"]["direction"],
-            "threshold_type": config["patch_detection"]["threshold_type"],
-            "connectivity": config["patch_detection"]["connectivity"],
-            "minimum_patch_cells": config["patch_detection"]["minimum_patch_cells"],
-            "minimum_patch_area_km2": config["patch_detection"]["minimum_patch_area_km2"],
-            "area_method": "Spherical latitude-longitude cell quadrilaterals",
-        },
-        "tracking": {
-            "maximum_calendar_gap_days": config["patch_tracking"]["maximum_calendar_gap_days"],
-            "minimum_iou": config["patch_tracking"]["minimum_iou"],
-            "minimum_predecessor_overlap": config["patch_tracking"]["minimum_predecessor_overlap"],
-            "minimum_successor_overlap": config["patch_tracking"]["minimum_successor_overlap"],
-            "distance_fallback": config["patch_tracking"]["allow_distance_fallback"],
-            "minimum_link_score": config["patch_tracking"]["minimum_link_score"],
-            "score_weights": config["patch_tracking"]["score_weights"],
-            "continuation_backbone": "Deterministic maximum-score one-to-one assignment",
-            "track_definition": "Maximal non-branching path through the lineage DAG",
-            "event_family_definition": "Weakly connected component including splits and merges",
-        },
-    })
-    st.markdown("#### Cached event-product status")
-    st.write({
-        "daily_patch_label_cube": str(resolve_project_path(config["patch_detection"]["labels_output"])),
-        "track_and_family_label_cube": str(resolve_project_path(config["patch_tracking"]["track_labels_output"])),
-        "tracking_summary_status": event_products.tracking_summary.status,
-    })
-    st.markdown("#### Event-tracking limitations")
-    st.info(
-        "Local daily patch IDs are not persistent. Tracks are maximal non-branching paths, while event "
-        "families may contain splits and merges. Results depend on threshold and connectivity, and small "
-        "threshold changes can alter lineage structure. Boundary-touching tracks may be incomplete. "
-        "Tracking describes thermal features, not individual water parcels. This experimental product "
-        "is not an official El Niño Costero classification."
+
+    with st.expander("Climatology", expanded=False):
+        st.write({
+            "Active method": climatology_method or "Unavailable",
+            "Reference period": (
+                f"{config['climatology']['reference_start']}–"
+                f"{config['climatology']['reference_end']}"
+            ),
+            "Sampling half-window": (
+                f"±{config['climatology']['sampling_half_window_days']} calendar days"
+            ),
+            "Smoothing window": (
+                f"{config['climatology']['smoothing_window_days']} circular days"
+            ),
+            "Fallback method": config["climatology"]["fallback_method"],
+            "Leap-day method": (
+                climatology.attrs.get("leap_day_method", "Not applicable to monthly fallback")
+                if climatology is not None else "Unavailable"
+            ),
+            "Active climatology file": diagnosis.get("climatology_file"),
+            "Fallback used": diagnosis.get("climatology_fallback_used", False),
+            "Percentile calculation state": (
+                climatology.attrs.get("percentile_calculation_state", "not applicable")
+                if climatology is not None else "not_calculated"
+            ),
+        })
+
+    with st.expander("Scientific calculations", expanded=False):
+        st.write({
+            "Univariate events": {
+                "Source series": config["event_detection"].get("source_metric"),
+                "Threshold type": config["event_detection"]["threshold_type"],
+                "Fixed threshold": config["event_detection"].get("fixed_anomaly_threshold_c"),
+                "Minimum duration (days)": config["event_detection"]["minimum_duration_days"],
+                "Allowed interruptions (days)": config["event_detection"]["allowed_gap_days"],
+                "Maximum calendar gap (days)": config["event_detection"]["maximum_calendar_gap_days"],
+            },
+            "Daily patches": {
+                "Source variable": config["patch_detection"]["source_variable"],
+                "Direction": config["patch_detection"]["direction"],
+                "Threshold type": config["patch_detection"]["threshold_type"],
+                "Connectivity": config["patch_detection"]["connectivity"],
+                "Minimum patch cells": config["patch_detection"]["minimum_patch_cells"],
+                "Minimum patch area (km²)": config["patch_detection"]["minimum_patch_area_km2"],
+                "Area method": "Spherical latitude-longitude cell quadrilaterals",
+            },
+            "Tracking": {
+                "Maximum calendar gap (days)": config["patch_tracking"]["maximum_calendar_gap_days"],
+                "Minimum IoU": config["patch_tracking"]["minimum_iou"],
+                "Minimum predecessor overlap": config["patch_tracking"]["minimum_predecessor_overlap"],
+                "Minimum successor overlap": config["patch_tracking"]["minimum_successor_overlap"],
+                "Distance fallback": config["patch_tracking"]["allow_distance_fallback"],
+                "Minimum link score": config["patch_tracking"]["minimum_link_score"],
+                "Score weights": config["patch_tracking"]["score_weights"],
+                "Continuation backbone": "Deterministic maximum-score one-to-one assignment",
+                "Track definition": "Maximal non-branching path through the lineage DAG",
+                "Event-family definition": (
+                    "Weakly connected component including continuations, splits, and merges"
+                ),
+            },
+        })
+        st.write({
+            "Daily patch label cube": str(
+                resolve_project_path(config["patch_detection"]["labels_output"])
+            ),
+            "Track and family label cube": str(
+                resolve_project_path(config["patch_tracking"]["track_labels_output"])
+            ),
+            "Tracking summary status": event_products.tracking_summary.status,
+        })
+
+    geographic_details = st.expander(
+        "Geographic foundation", expanded=False, on_change="rerun"
     )
-    st.warning("Experimental product. Official ENSO and El Niño Costero classification is not provided.")
-    st.markdown(f"#### {tr('glossary', language)}")
-    glossary_rows = [
-        {
-            ("Término" if language == "es" else "Term"): human_label(term, language),
-            ("Definición" if language == "es" else "Definition"): definition,
-        }
-        for term, definition in glossary(language).items()
-    ]
-    st.dataframe(pd.DataFrame(glossary_rows), hide_index=True, width="stretch")
-    st.warning(scientific_disclaimer(language), icon=":material/science:")
-    st.caption("Dates are read from the NetCDF time coordinate, never from global time-coverage attributes.")
+    if tabs[6].open and geographic_details.open:
+        with geographic_details:
+            geography_registry = load_geography_registry(config)
+            st.info(
+                "Niño 3.4, Niño 3, and Niño 1+2 are geographic overlays for context. "
+                "Current scientific calculations remain restricted to Niño 1+2."
+            )
+            st.caption(
+                "The 60-nautical-mile corridor is measured only from the continental "
+                "Pacific coastline of Ecuador, Peru, and Chile. Islands do not generate buffers."
+            )
+            st.write({
+                "Pacific context bounds": geography_registry.display_domain.bounds.to_dict(),
+                "Humboldt coastal bounds": geography_registry.analysis_domains[
+                    "humboldt_coastal"
+                ].bounds.to_dict(),
+                "South Pacific High diagnostic bounds": geography_registry.analysis_domains[
+                    "south_pacific_high"
+                ].bounds.to_dict(),
+                "60 nm corridor specification": geography_registry.coastal_corridors[
+                    "humboldt_60nm"
+                ].to_dict(),
+            })
+            nino_region_rows = [
+                {
+                    "Region": region.label,
+                    "Internal ID": region.id,
+                    "Longitude": f"{region.bounds.west:g} to {region.bounds.east:g}",
+                    "Latitude": f"{region.bounds.south:g} to {region.bounds.north:g}",
+                    "Geometry": region.geometry_type,
+                }
+                for region in geography_registry.standard_regions.values()
+            ]
+            st.dataframe(pd.DataFrame(nino_region_rows), hide_index=True, width="stretch")
+            try:
+                geographic_foundation = load_geographic_foundation_resource()
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                st.warning(
+                    "The local geographic foundation could not be prepared. No download "
+                    f"was attempted. Details: {exc}"
+                )
+            else:
+                st.write({
+                    "Coastline source status": geographic_foundation.source_status.to_dict(),
+                    "Coastal corridor geometry status": geographic_foundation.corridor_status,
+                })
+                for warning in geographic_foundation.warnings:
+                    st.warning(warning)
+                geographic_figure = plot_geographic_foundation(
+                    geographic_foundation.registry,
+                    local_geometries=geographic_foundation.local_geometries,
+                    corridor=geographic_foundation.corridor,
+                    source_status=geographic_foundation.source_status,
+                )
+                st.pyplot(geographic_figure, width="stretch")
+                plt.close(geographic_figure)
+
+    with st.expander("Quality control", expanded=False):
+        if qc_report:
+            st.json(qc_report)
+        else:
+            st.info("The cached quality-control report is unavailable.")
+
+    with st.expander("Limitations and glossary", expanded=False):
+        st.info(
+            "Local daily patch IDs are not persistent. Tracks are maximal non-branching paths, "
+            "while event families may contain splits and merges. Results depend on threshold and "
+            "connectivity. Boundary-touching tracks may be incomplete. Tracking describes thermal "
+            "features, not individual water parcels."
+        )
+        glossary_rows = [
+            {"Term": human_label(term, language), "Definition": definition}
+            for term, definition in glossary(language).items()
+        ]
+        st.dataframe(pd.DataFrame(glossary_rows), hide_index=True, width="stretch")
+        st.warning(scientific_disclaimer(language), icon=":material/science:")
+
 
 with tabs[7]:
-    st.subheader("Export selected diagnosis")
-    st.download_button("Download temporal metrics CSV", series.to_csv(index=False), "nino12_daily_metrics.csv", "text/csv")
-    st.download_button("Download diagnosis NetCDF", bytes(fields.to_netcdf()), f"nino12_diagnosis_{analysis_date}.nc", "application/x-netcdf")
-    diagnosis_json = dumps_json_safe(diagnosis)
-    st.download_button(
-        label="Download diagnosis JSON",
-        data=diagnosis_json,
-        file_name=f"nino12_diagnosis_{analysis_date}.json",
-        mime="application/json",
+    st.subheader("Export")
+    st.caption(
+        "Downloads use cached local products and safe serialization. Missing products are "
+        "disabled explicitly; rendering this page does not create new analytical outputs."
     )
+
+    with st.expander("Daily diagnosis", expanded=True):
+        st.download_button(
+            "Download temporal metrics CSV",
+            series.to_csv(index=False),
+            "nino12_daily_metrics.csv",
+            "text/csv",
+        )
+        st.download_button(
+            "Download diagnosis NetCDF",
+            bytes(fields.to_netcdf()),
+            f"nino12_diagnosis_{analysis_date}.nc",
+            "application/x-netcdf",
+        )
+        diagnosis_json = dumps_json_safe(diagnosis)
+        st.download_button(
+            label="Download diagnosis JSON",
+            data=diagnosis_json,
+            file_name=f"nino12_diagnosis_{analysis_date}.json",
+            mime="application/json",
+        )
+
+    with st.expander("Analytical tables", expanded=False):
+        analytical_products = [
+            ("Series bank", config["series_bank"]["output"]),
+            ("Temporal features", config["temporal_features"]["output"]),
+            ("Spatial features", config["spatial_features"]["output"]),
+            ("Representativeness", config["representativeness"]["output"]),
+        ]
+        for index, (label, path) in enumerate(analytical_products):
+            render_cached_download(label, path, key=f"export_analytics_{index}")
+
+    with st.expander("Thermal-event products", expanded=False):
+        event_paths = [
+            ("Univariate events", config["event_detection"]["events_output"]),
+            ("Univariate daily flags", config["event_detection"]["daily_flags_output"]),
+            ("Daily patches", config["patch_detection"]["patches_output"]),
+            ("Daily patch summary", config["patch_detection"]["daily_summary_output"]),
+            ("Patch observations", config["patch_tracking"]["observations_output"]),
+            ("Lineage edges", config["patch_tracking"]["edges_output"]),
+            ("Tracks", config["patch_tracking"]["tracks_output"]),
+            ("Event families", config["patch_tracking"]["families_output"]),
+        ]
+        for index, (label, path) in enumerate(event_paths):
+            render_cached_download(label, path, key=f"export_events_{index}")
+
+    with st.expander("Scientific brief products", expanded=False):
+        brief_directory = resolve_project_path(config["brief_generation"]["output_directory"])
+        brief_files = (
+            sorted(
+                path
+                for path in brief_directory.glob("*")
+                if path.is_file() and path.suffix.lower() in {".json", ".md", ".parquet"}
+            )
+            if brief_directory.exists()
+            else []
+        )
+        if brief_files:
+            for index, path in enumerate(brief_files):
+                render_cached_download(
+                    path.name,
+                    path,
+                    key=f"export_brief_{index}",
+                )
+        else:
+            st.info("No cached scientific brief products are available.")
+
+    with st.expander("Metadata and validation reports", expanded=False):
+        report_paths = [
+            ("Quality-control report", config["quality_control"]["output"]),
+            (
+                "Daily climatology validation",
+                "outputs/reports/daily_climatology_validation.json",
+            ),
+            ("Univariate event summary", config["event_detection"]["summary_output"]),
+            ("Daily patch build summary", config["patch_detection"]["json_summary_output"]),
+            ("Tracking summary", config["patch_tracking"]["json_summary_output"]),
+        ]
+        for index, (label, path) in enumerate(report_paths):
+            render_cached_download(label, path, key=f"export_reports_{index}")

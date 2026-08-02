@@ -41,7 +41,6 @@ from src.help_content import event_concept_hierarchy, filter_description, metric
 from src.i18n import format_identifier, human_label, internal_id_caption, tr
 from src.interpretation_text import interpret_thermal_event
 from src.patch_linking import haversine_distance_km
-from src.sidebar_manual import is_advanced
 
 
 @dataclass(frozen=True)
@@ -258,35 +257,31 @@ def _overview_panel(
     event_status: str | None,
     maximum_rows: int,
     language: str,
-    view_mode: str,
-    show_internal_ids: bool,
 ) -> None:
     overview = prepare_event_overview(products, event_date, representativeness)
     with st.container(horizontal=True):
         st.metric(tr("active_univariate_event", language), tr("active", language) if overview.active_event else tr("not_active", language), border=True)
         st.metric(tr("current_event", language), format_identifier(overview.event_id, language) if overview.event_id else tr("not_active", language), border=True)
         st.metric(tr("event_day", language), overview.event_day if overview.event_day is not None else "—", border=True)
-        if is_advanced(view_mode):
-            st.metric(tr("event_duration", language), format_scalar(overview.event_duration_days, tr("days", language), precision=0), border=True)
-            st.metric(tr("current_intensity", language), format_scalar(overview.current_intensity), border=True)
-            st.metric(tr("cumulative_intensity", language), format_scalar(overview.cumulative_event_intensity), border=True)
-    with st.container(horizontal=True):
         st.metric(tr("daily_patch_count", language), overview.patch_count, border=True)
-        if is_advanced(view_mode):
-            st.metric(tr("total_patch_area", language), format_scalar(overview.total_patch_area_km2, "km²"), border=True)
         st.metric(tr("largest_patch", language), format_scalar(overview.largest_patch_area_km2, "km²"), border=True)
         st.metric(tr("active_tracks", language), overview.active_track_count, help=metric_tooltip("track", language), border=True)
         st.metric(tr("active_families", language), overview.active_family_count, help=metric_tooltip("event_family", language), border=True)
-        if is_advanced(view_mode):
-            st.metric(tr("representativeness", language), human_label(overview.representativeness_class, language), border=True)
-            st.metric(tr("valid_coverage", language), format_fraction(overview.valid_coverage), help=metric_tooltip("valid_coverage", language), border=True)
 
     st.info(interpret_thermal_event(event_date, overview, language))
-    with st.expander(tr("key_concepts", language), expanded=False):
+    with st.expander("Evidence and supporting diagnostics", expanded=False):
+        with st.container(horizontal=True):
+            st.metric(tr("event_duration", language), format_scalar(overview.event_duration_days, tr("days", language), precision=0), border=True)
+            st.metric(tr("current_intensity", language), format_scalar(overview.current_intensity), border=True)
+            st.metric(tr("cumulative_intensity", language), format_scalar(overview.cumulative_event_intensity), border=True)
+            st.metric(tr("total_patch_area", language), format_scalar(overview.total_patch_area_km2, "km²"), border=True)
+            st.metric(tr("representativeness", language), human_label(overview.representativeness_class, language), border=True)
+            st.metric(tr("valid_coverage", language), format_fraction(overview.valid_coverage), help=metric_tooltip("valid_coverage", language), border=True)
+        if overview.event_id:
+            st.caption(internal_id_caption(overview.event_id, language))
+    with st.expander("Interpretation and limitations", expanded=False):
         for concept in event_concept_hierarchy(language):
             st.write(concept)
-    if overview.event_id and show_internal_ids and is_advanced(view_mode):
-        st.caption(internal_id_caption(overview.event_id, language))
 
     flags = products.table("univariate_flags")
     events = products.table("univariate_events")
@@ -309,68 +304,64 @@ def _overview_panel(
     )
     if events.empty:
         st.info("No univariate events match the selected filters.")
-    elif not is_advanced(view_mode):
-        st.caption(f"{len(events):,} cached events match the selected filters. The complete table is available in Advanced mode.")
     else:
-        event_display = stable_table(events, EVENT_DISPLAY_COLUMNS, maximum_rows)
-        table_state = st.dataframe(
-            event_display, hide_index=True, width="stretch", on_select="rerun",
-            selection_mode="single-row", key="event_dashboard_event_table",
-        )
-        selected_rows = table_state.selection.rows
-        if selected_rows and "event_id" in event_display:
-            selected_event = str(event_display.iloc[selected_rows[0]].event_id)
-        if selected_event:
-            event_record = selected_record(events, "event_id", selected_event)
-            if event_record:
-                st.json(event_record)
+        with st.expander("Detailed event table and technical identifiers", expanded=False):
+            event_display = stable_table(events, EVENT_DISPLAY_COLUMNS, maximum_rows)
+            table_state = st.dataframe(
+                event_display, hide_index=True, width="stretch", on_select="rerun",
+                selection_mode="single-row", key="event_dashboard_event_table",
+            )
+            selected_rows = table_state.selection.rows
+            if selected_rows and "event_id" in event_display:
+                selected_event = str(event_display.iloc[selected_rows[0]].event_id)
+            if selected_event:
+                event_record = selected_record(events, "event_id", selected_event)
+                if event_record:
+                    st.json(event_record)
 
-    if not is_advanced(view_mode):
-        return
-
-    st.markdown("#### Event catalogue")
-    catalogue_tabs = st.tabs(["Univariate events", "Tracks", "Event families"])
-    all_frames = [events, products.table("tracks"), products.table("event_families")]
-    for tab, name, frame in zip(catalogue_tabs, ("events", "tracks", "families"), all_frames, strict=True):
-        with tab:
-            search = st.text_input("Search", key=f"event_dashboard_search_{name}", placeholder="ID, status, or metadata")
-            dates = []
-            for column in ("start_date", "end_date"):
-                if column in frame:
-                    dates.extend(pd.to_datetime(frame[column], errors="coerce").dropna().tolist())
-            if dates:
-                date_range = st.date_input(
-                    "Catalogue date range",
-                    value=(min(dates).date(), max(dates).date()),
-                    min_value=min(dates).date(), max_value=max(dates).date(),
-                    key=f"event_dashboard_dates_{name}",
-                )
-                if isinstance(date_range, tuple) and len(date_range) == 2:
-                    start, end = date_range
+    with st.expander("Complete event catalogues", expanded=False):
+        catalogue_tabs = st.tabs(["Univariate events", "Tracks", "Event families"])
+        all_frames = [events, products.table("tracks"), products.table("event_families")]
+        for tab, name, frame in zip(catalogue_tabs, ("events", "tracks", "families"), all_frames, strict=True):
+            with tab:
+                search = st.text_input("Search", key=f"event_dashboard_search_{name}", placeholder="ID, status, or metadata")
+                dates = []
+                for column in ("start_date", "end_date"):
+                    if column in frame:
+                        dates.extend(pd.to_datetime(frame[column], errors="coerce").dropna().tolist())
+                if dates:
+                    date_range = st.date_input(
+                        "Catalogue date range",
+                        value=(min(dates).date(), max(dates).date()),
+                        min_value=min(dates).date(), max_value=max(dates).date(),
+                        key=f"event_dashboard_dates_{name}",
+                    )
+                    if isinstance(date_range, tuple) and len(date_range) == 2:
+                        start, end = date_range
+                    else:
+                        start = end = None
                 else:
                     start = end = None
-            else:
-                start = end = None
-            filters = st.columns(4)
-            minimum_duration = filters[0].number_input("Minimum duration (days)", min_value=0.0, value=0.0, key=f"event_dashboard_duration_{name}")
-            minimum_area = filters[1].number_input("Minimum area (km²)", min_value=0.0, value=0.0, key=f"event_dashboard_area_{name}")
-            minimum_severity = filters[2].number_input("Minimum severity", min_value=0.0, value=0.0, key=f"event_dashboard_severity_{name}")
-            boundary = filters[3].checkbox("Boundary contact", key=f"event_dashboard_boundary_{name}")
-            relation_columns = st.columns(2)
-            require_split = relation_columns[0].checkbox("Contains split", key=f"event_dashboard_split_{name}")
-            require_merge = relation_columns[1].checkbox("Contains merge", key=f"event_dashboard_merge_{name}")
-            filtered = filter_catalogue(
-                frame, start_date=start, end_date=end, minimum_duration=minimum_duration,
-                minimum_area=minimum_area, minimum_severity=minimum_severity,
-                require_split=require_split, require_merge=require_merge,
-                require_boundary_contact=boundary, search=search,
-            )
-            st.caption(f"{len(filtered):,} rows after filtering")
-            st.dataframe(filtered.head(maximum_rows), hide_index=True, width="stretch")
-            st.download_button(
-                f"Download filtered {name} CSV", dataframe_to_iso_csv(filtered),
-                file_name=f"filtered_{name}.csv", mime="text/csv", key=f"event_dashboard_filtered_download_{name}",
-            )
+                filters = st.columns(4)
+                minimum_duration = filters[0].number_input("Minimum duration (days)", min_value=0.0, value=0.0, key=f"event_dashboard_duration_{name}")
+                minimum_area = filters[1].number_input("Minimum area (km²)", min_value=0.0, value=0.0, key=f"event_dashboard_area_{name}")
+                minimum_severity = filters[2].number_input("Minimum severity", min_value=0.0, value=0.0, key=f"event_dashboard_severity_{name}")
+                boundary = filters[3].checkbox("Boundary contact", key=f"event_dashboard_boundary_{name}")
+                relation_columns = st.columns(2)
+                require_split = relation_columns[0].checkbox("Contains split", key=f"event_dashboard_split_{name}")
+                require_merge = relation_columns[1].checkbox("Contains merge", key=f"event_dashboard_merge_{name}")
+                filtered = filter_catalogue(
+                    frame, start_date=start, end_date=end, minimum_duration=minimum_duration,
+                    minimum_area=minimum_area, minimum_severity=minimum_severity,
+                    require_split=require_split, require_merge=require_merge,
+                    require_boundary_contact=boundary, search=search,
+                )
+                st.caption(f"{len(filtered):,} rows after filtering")
+                st.dataframe(filtered.head(maximum_rows), hide_index=True, width="stretch")
+                st.download_button(
+                    f"Download filtered {name} CSV", dataframe_to_iso_csv(filtered),
+                    file_name=f"filtered_{name}.csv", mime="text/csv", key=f"event_dashboard_filtered_download_{name}",
+                )
 
 
 def _patch_panel(
@@ -382,14 +373,11 @@ def _patch_panel(
     anomaly: xr.DataArray | None,
     anomaly_date: pd.Timestamp,
     maximum_rows: int,
-    view_mode: str,
     language: str,
-    show_internal_ids: bool,
 ) -> None:
     patches = rows_for_date(products.table("daily_patches"), event_date)
     dashboard_config = config["event_dashboard"]
-    control_context = st.container() if is_advanced(view_mode) else st.expander("Map options", expanded=False)
-    with control_context:
+    with st.expander("Map options", expanded=False):
         controls = st.columns(4)
         show_background = controls[0].checkbox("Show anomaly background", value=dashboard_config["show_anomaly_background_default"], key="event_dashboard_patch_background")
         show_labels = controls[1].checkbox("Show patch labels", value=dashboard_config["show_patch_labels_default"], key="event_dashboard_patch_labels")
@@ -424,14 +412,18 @@ def _patch_panel(
         st.info("No retained daily patches are present on this date.")
         return
     patch_table = prepare_patch_table(products.table("daily_patches"), event_date)
-    if not is_advanced(view_mode):
-        basic_columns = [
-            "patch_id", "area_km2", "area_fraction_of_threshold_total",
-            "centroid_latitude", "centroid_longitude", "mean_source_value",
-            "maximum_source_value", "mean_exceedance", "maximum_exceedance",
-        ]
-        patch_table = patch_table[[column for column in basic_columns if column in patch_table]]
-    st.dataframe(patch_table.head(maximum_rows), hide_index=True, width="stretch")
+    essential_columns = [
+        "patch_id", "area_km2", "area_fraction_of_threshold_total",
+        "centroid_latitude", "centroid_longitude", "mean_source_value",
+        "maximum_source_value", "mean_exceedance", "maximum_exceedance",
+    ]
+    st.dataframe(
+        patch_table[[column for column in essential_columns if column in patch_table]].head(maximum_rows),
+        hide_index=True,
+        width="stretch",
+    )
+    with st.expander("Complete patch geometry and technical details", expanded=False):
+        st.dataframe(patch_table.head(maximum_rows), hide_index=True, width="stretch")
     st.download_button(
         "Download selected-date patch CSV", dataframe_to_iso_csv(patches),
         file_name=f"daily_patches_{event_date.date().isoformat()}.csv", mime="text/csv",
@@ -453,14 +445,14 @@ def _patch_panel(
             st.warning("This local patch has no matching cached tracking observation.")
         else:
             row = observation.iloc[0]
-            st.write({
-                "Track": format_identifier(row.get("track_id"), language),
-                "Family" if language == "en" else "Familia": format_identifier(row.get("event_family_id"), language),
-                "Role" if language == "en" else "Rol": human_label(row.get("node_event_type"), language),
-                "Predecessors" if language == "en" else "Predecesores": row.get("parent_node_ids", []),
-                "Successors" if language == "en" else "Sucesores": row.get("child_node_ids", []),
-            })
-            if show_internal_ids and is_advanced(view_mode):
+            with st.expander("Tracking relationships and technical identifiers", expanded=False):
+                st.write({
+                    "Track": format_identifier(row.get("track_id"), language),
+                    "Family": format_identifier(row.get("event_family_id"), language),
+                    "Role": human_label(row.get("node_event_type"), language),
+                    "Predecessors": row.get("parent_node_ids", []),
+                    "Successors": row.get("child_node_ids", []),
+                })
                 st.caption(
                     f"{internal_id_caption(row.get('track_id'), language)} · "
                     f"{internal_id_caption(row.get('event_family_id'), language)}"
@@ -475,7 +467,6 @@ def _track_panel(
     selected_track: str | None,
     *,
     maximum_arrows: int,
-    view_mode: str,
     language: str,
 ) -> None:
     if selected_track is None:
@@ -532,15 +523,26 @@ def _track_panel(
             ("Expansion days", row.get("expansion_day_count"), "days"), ("Contraction days", row.get("contraction_day_count"), "days"),
             ("Family ID", row.get("event_family_id"), ""),
         ]
-        if not is_advanced(view_mode):
-            metrics = [metrics[index] for index in (0, 2, 4, 5, 7, 12)]
+        essential_indexes = (0, 2, 4, 5, 7, 12)
         with st.container(horizontal=True):
-            for label, value, unit in metrics:
+            for index in essential_indexes:
+                label, value, unit = metrics[index]
                 st.metric(
                     label,
                     format_identifier(value, language) if label == "Family ID" else format_scalar(value, unit),
                     border=True,
                 )
+        with st.expander("Supporting track metrics and technical details", expanded=False):
+            with st.container(horizontal=True):
+                for index, (label, value, unit) in enumerate(metrics):
+                    if index in essential_indexes:
+                        continue
+                    st.metric(
+                        label,
+                        format_identifier(value, language) if label == "Family ID" else format_scalar(value, unit),
+                        border=True,
+                    )
+            st.caption(internal_id_caption(selected_track, language))
     daily = prepare_track_daily_series(track_observations, all_edges, selected_track)
     specs = [
         ("area_km2", "Area through time", "km²"), ("mean_exceedance", "Mean exceedance", "°C"),
@@ -548,17 +550,20 @@ def _track_panel(
         ("centroid_longitude", "Centroid longitude", "degrees east"), ("speed_km_per_day", "Speed", "km/day"),
         ("area_change_km2_per_day", "Daily expansion or contraction", "km²/day"),
     ]
-    if not is_advanced(view_mode):
-        specs = [specs[index] for index in (0, 1, 3, 4)]
-    for start in range(0, len(specs), 2):
-        columns = st.columns(2)
-        for column, (metric, title, unit) in zip(columns, specs[start : start + 2], strict=False):
-            with column.container(border=True):
-                chart = temporal_metric_chart(daily, value_column=metric, selected_date=event_date, title=title, unit=unit)
-                if chart is None:
-                    st.info(f"{title} is not calculated for this track.")
-                else:
-                    st.altair_chart(chart, width="stretch")
+    def render_metric_charts(chart_specs: list[tuple[str, str, str]]) -> None:
+        for start in range(0, len(chart_specs), 2):
+            columns = st.columns(2)
+            for column, (metric, title, unit) in zip(columns, chart_specs[start : start + 2], strict=False):
+                with column.container(border=True):
+                    chart = temporal_metric_chart(daily, value_column=metric, selected_date=event_date, title=title, unit=unit)
+                    if chart is None:
+                        st.info(f"{title} is not calculated for this track.")
+                    else:
+                        st.altair_chart(chart, width="stretch")
+
+    render_metric_charts([specs[index] for index in (0, 1, 3, 4)])
+    with st.expander("Detailed temporal track diagnostics", expanded=False):
+        render_metric_charts([specs[index] for index in (2, 5, 6)])
     st.markdown("#### Non-cartographic trajectory")
     try:
         trajectory = plot_track_trajectory(track_observations, event_date, maximum_arrows)
@@ -579,7 +584,6 @@ def _family_panel(
     *,
     maximum_nodes: int,
     maximum_rows: int,
-    view_mode: str,
 ) -> None:
     if selected_family is None:
         st.info("Select an event family (or one of its tracks) in the shared filters.")
@@ -598,8 +602,7 @@ def _family_panel(
         edges.predecessor_node_id.astype(str).isin(node_ids)
         & edges.successor_node_id.astype(str).isin(node_ids)
     ].copy() if not edges.empty else edges
-    control_context = st.container() if is_advanced(view_mode) else st.expander("Family map options", expanded=False)
-    with control_context:
+    with st.expander("Family map options", expanded=False):
         controls = st.columns(5)
         show_all = controls[0].checkbox("All family tracks", value=config["event_dashboard"]["show_family_tracks_default"], key="event_dashboard_family_all_tracks")
         show_links = controls[1].checkbox("Split/merge links", value=True, key="event_dashboard_family_links")
@@ -653,50 +656,59 @@ def _family_panel(
             ("Maximum extent", format_scalar(row.get("maximum_family_extent_km"), "km")),
             ("Boundary contact days", format_scalar(row.get("boundary_contact_day_count"), "days", precision=0)),
         ]
-        if not is_advanced(view_mode):
-            summary = [summary[index] for index in (0, 1, 2, 3, 4, 9, 10, 11)]
+        essential_indexes = (0, 1, 2, 3, 4, 9, 10, 11)
         with st.container(horizontal=True):
-            for label, value in summary:
+            for index in essential_indexes:
+                label, value = summary[index]
                 if isinstance(value, pd.Timestamp):
                     value = value.date().isoformat()
                 st.metric(label, str(value), border=True)
+        with st.expander("Supporting family metrics and technical identifiers", expanded=False):
+            with st.container(horizontal=True):
+                for index, (label, value) in enumerate(summary):
+                    if index in essential_indexes:
+                        continue
+                    if isinstance(value, pd.Timestamp):
+                        value = value.date().isoformat()
+                    st.metric(label, str(value), border=True)
+            st.caption(internal_id_caption(selected_family, "en"))
     daily = prepare_family_daily_series(family, selected_family)
     family_specs = [
         ("total_family_area_km2", "Total family area", "km²"), ("patch_count", "Daily patch count", "patches"),
         ("centroid_latitude", "Family centroid latitude", "degrees north"), ("centroid_longitude", "Family centroid longitude", "degrees east"),
         ("mean_exceedance", "Area-weighted mean exceedance", "°C"), ("maximum_exceedance", "Maximum exceedance", "°C"),
     ]
-    if not is_advanced(view_mode):
-        family_specs = [family_specs[index] for index in (0, 1, 2, 3)]
-    for start in range(0, len(family_specs), 2):
-        columns = st.columns(2)
-        for column, (metric, title, unit) in zip(columns, family_specs[start : start + 2], strict=False):
-            with column.container(border=True):
-                chart = temporal_metric_chart(daily, value_column=metric, selected_date=event_date, title=title, unit=unit)
-                if chart is None:
-                    st.info(f"No finite values are available for {title.lower()}.")
+    def render_family_charts(chart_specs: list[tuple[str, str, str]]) -> None:
+        for start in range(0, len(chart_specs), 2):
+            columns = st.columns(2)
+            for column, (metric, title, unit) in zip(columns, chart_specs[start : start + 2], strict=False):
+                with column.container(border=True):
+                    chart = temporal_metric_chart(daily, value_column=metric, selected_date=event_date, title=title, unit=unit)
+                    if chart is None:
+                        st.info(f"No finite values are available for {title.lower()}.")
+                    else:
+                        st.altair_chart(chart, width="stretch")
+
+    render_family_charts([family_specs[index] for index in (0, 1, 2, 3)])
+    with st.expander("Detailed family diagnostics and lineage", expanded=False):
+        render_family_charts([family_specs[index] for index in (4, 5)])
+        lineage = lineage_chart(family, family_edges, selected_date=event_date, selected_track=selected_track, maximum_nodes=maximum_nodes)
+        if lineage.chart is None:
+            st.info("This family has no lineage edges or drawable observations.")
+        else:
+            if lineage.simplified:
+                st.warning(f"The lineage view was simplified to {lineage.displayed_node_count} nodes; use the tables for complete detail.")
+            st.altair_chart(lineage.chart, width="stretch")
+        observation_table, edge_table, track_table = prepare_family_tables(
+            selected_family, observations, edges, products.table("tracks")
+        )
+        table_tabs = st.tabs(["Patch observations", "Lineage edges", "Track summaries"])
+        for tab, table in zip(table_tabs, (observation_table, edge_table, track_table), strict=True):
+            with tab:
+                if table.empty:
+                    st.info("No rows are available for this relationship table.")
                 else:
-                    st.altair_chart(chart, width="stretch")
-    if not is_advanced(view_mode):
-        st.caption("Lineage graph, IoU, overlap fractions, and complete relationship tables are available in Advanced mode.")
-        return
-    lineage = lineage_chart(family, family_edges, selected_date=event_date, selected_track=selected_track, maximum_nodes=maximum_nodes)
-    if lineage.chart is None:
-        st.info("This family has no lineage edges or drawable observations.")
-    else:
-        if lineage.simplified:
-            st.warning(f"The lineage view was simplified to {lineage.displayed_node_count} nodes; use the tables for complete detail.")
-        st.altair_chart(lineage.chart, width="stretch")
-    observation_table, edge_table, track_table = prepare_family_tables(
-        selected_family, observations, edges, products.table("tracks")
-    )
-    table_tabs = st.tabs(["Patch observations", "Lineage edges", "Track summaries"])
-    for tab, table in zip(table_tabs, (observation_table, edge_table, track_table), strict=True):
-        with tab:
-            if table.empty:
-                st.info("No rows are available for this relationship table.")
-            else:
-                st.dataframe(table.head(maximum_rows), hide_index=True, width="stretch")
+                    st.dataframe(table.head(maximum_rows), hide_index=True, width="stretch")
 
 
 def _downloads_panel(
@@ -704,10 +716,9 @@ def _downloads_panel(
     *,
     selected_track: str | None,
     selected_family: str | None,
-    view_mode: str,
     language: str,
 ) -> None:
-    st.markdown(f"#### {tr('cached_downloads' if is_advanced(view_mode) else 'essential_downloads', language)}")
+    st.markdown(f"#### {tr('cached_downloads', language)}")
     downloads = [
         ("Univariate events", products.table("univariate_events"), "univariate_events.csv"),
         ("Univariate daily flags", products.table("univariate_flags"), "univariate_event_daily_flags.csv"),
@@ -718,8 +729,6 @@ def _downloads_panel(
         ("Tracks", products.table("tracks"), "spatiotemporal_tracks.csv"),
         ("Event families", products.table("event_families"), "spatiotemporal_event_families.csv"),
     ]
-    if not is_advanced(view_mode):
-        downloads = [downloads[0], downloads[2], downloads[6], downloads[7]]
     columns = st.columns(4)
     for index, (label, frame, name) in enumerate(downloads):
         columns[index % 4].download_button(
@@ -760,11 +769,9 @@ def render_thermal_events_tab(
     representativeness: pd.DataFrame,
     anomaly: xr.DataArray | None = None,
     project_root: str | Path = ".",
-    language: str = "es",
-    view_mode: str = "basic",
-    show_internal_ids: bool = True,
 ) -> None:
     """Render the complete Increment 4D interface from cached products only."""
+    language = "en"
     st.subheader(tr("thermal_events", language))
     st.caption(
         "Cached Increment 4 products: regional events, date-local patches, non-branching tracks, "
@@ -814,12 +821,7 @@ def render_thermal_events_tab(
     threshold_options = sorted(set(events.get("threshold_type", pd.Series(dtype=object)).dropna().astype(str)) | set(patches.get("threshold_type", pd.Series(dtype=object)).dropna().astype(str)))
     direction_options = sorted(set(events.get("direction", pd.Series(dtype=object)).dropna().astype(str)) | set(patches.get("direction", pd.Series(dtype=object)).dropna().astype(str)))
     status_options = sorted(set(events.get("status", pd.Series(dtype=object)).dropna().astype(str)) | set(tracks.get("status", pd.Series(dtype=object)).dropna().astype(str)))
-    filter_context = (
-        st.container()
-        if is_advanced(view_mode)
-        else st.expander(tr("more_filters", language), expanded=False)
-    )
-    with filter_context:
+    with st.expander("Additional event filters", expanded=False):
         filter_columns = st.columns(4)
         format_value = lambda value: tr("all", language) if value == tr("all", language) else human_label(value, language)
         with filter_columns[0]:
@@ -882,10 +884,12 @@ def render_thermal_events_tab(
         match = filtered_tracks.loc[filtered_tracks.track_id.astype(str) == selected_track]
         if not match.empty:
             selected_family = str(match.iloc[0].event_family_id)
-            st.caption(
-                f"{format_identifier(selected_track, language)} → {format_identifier(selected_family, language)}"
-                + (f" · {internal_id_caption(selected_track, language)} · {internal_id_caption(selected_family, language)}" if show_internal_ids and is_advanced(view_mode) else "")
-            )
+            st.caption(f"{format_identifier(selected_track, language)} → {format_identifier(selected_family, language)}")
+            with st.expander("Technical identifiers", expanded=False):
+                st.caption(
+                    f"{internal_id_caption(selected_track, language)} · "
+                    f"{internal_id_caption(selected_family, language)}"
+                )
     if requested_family and candidate_tracks.empty:
         st.info("No tracks in the selected family satisfy the duration and area filters.")
 
@@ -910,28 +914,26 @@ def render_thermal_events_tab(
                 source_variable=source_variable, threshold_type=threshold_type,
                 direction=direction, event_status=event_status,
                 maximum_rows=dashboard_config["maximum_table_rows"],
-                language=language, view_mode=view_mode, show_internal_ids=show_internal_ids,
+                language=language,
             )
-            _downloads_panel(
-                products, selected_track=selected_track, selected_family=selected_family,
-                view_mode=view_mode, language=language,
-            )
+            with st.expander("Cached thermal-event downloads", expanded=False):
+                _downloads_panel(
+                    products, selected_track=selected_track, selected_family=selected_family,
+                    language=language,
+                )
     if sub_tabs[1].open:
         with sub_tabs[1]:
             _patch_panel(
                 products, config, Path(project_root), event_date,
                 anomaly=anomaly, anomaly_date=pd.Timestamp(analysis_date),
                 maximum_rows=dashboard_config["maximum_table_rows"],
-                view_mode=view_mode,
                 language=language,
-                show_internal_ids=show_internal_ids,
             )
     if sub_tabs[2].open:
         with sub_tabs[2]:
             _track_panel(
                 products, config, Path(project_root), event_date, selected_track,
                 maximum_arrows=dashboard_config["trajectory_maximum_arrows"],
-                view_mode=view_mode,
                 language=language,
             )
     if sub_tabs[3].open:
@@ -940,5 +942,4 @@ def render_thermal_events_tab(
                 products, config, Path(project_root), event_date, selected_family, selected_track,
                 maximum_nodes=dashboard_config["maximum_lineage_nodes"],
                 maximum_rows=dashboard_config["maximum_table_rows"],
-                view_mode=view_mode,
             )

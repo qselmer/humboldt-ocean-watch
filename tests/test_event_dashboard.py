@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import inspect
 import json
 import numpy as np
 import pandas as pd
@@ -11,6 +12,7 @@ from src.event_dashboard import (
     prepare_event_overview,
     prepare_family_daily_series,
     prepare_track_daily_series,
+    render_thermal_events_tab,
 )
 from src.event_data_loader import EventProducts, ProductState
 from src.event_tables import filter_catalogue, prepare_family_tables
@@ -137,4 +139,11 @@ def test_catalogue_filters_and_exports_are_stable_strict_and_iso() -> None:
 
 def test_empty_selection_json_is_valid() -> None:
     assert json.loads(record_to_json(pd.DataFrame())) == []
+
+
+def test_event_dashboard_uses_progressive_disclosure_without_view_modes() -> None:
+    source = inspect.getsource(render_thermal_events_tab)
+    assert "view_mode" not in source
+    assert "is_advanced" not in source
+    assert "Additional event filters" in source
 

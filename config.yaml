@@ -97,12 +97,12 @@ logging:
   level: INFO
 
 interface:
-  default_language: es
-  available_languages:
-    - es
-    - en
-  default_view_mode: basic
-  show_internal_ids: true
+  language: en
+  mode: interpretability_first
+  progressive_disclosure: true
+  show_internal_ids: false
+  show_language_selector: false
+  show_view_mode_selector: false
 
 climatology:
   primary_method: daily_smoothed

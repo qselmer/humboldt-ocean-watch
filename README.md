@@ -3,8 +3,9 @@
 Humboldt Ocean Watch is an **experimental daily thermal-monitoring product** for
 sea surface temperature (SST) and thermal anomalies in the Niño 1+2 region
 (90–80°W, 10°S–0°). It combines cached gridded SST, a 1991–2020 smoothed daily
-climatology, deterministic scientific analytics, a bilingual Streamlit
-dashboard, and an optional validated scientific-brief pipeline.
+climatology, deterministic scientific analytics, an English-only
+interpretability-first Streamlit dashboard, and an optional validated
+scientific-brief pipeline.
 
 This repository does **not** provide an official classification of Coastal El
 Niño magnitude, causal attribution, forecasts, or biological, fisheries,
@@ -59,8 +60,8 @@ validated locally by Python; they do not calculate the scientific metrics.
 - Identifies daily connected thermal patches using spherical cell areas.
 - Links daily patches into non-branching tracks and lineage-connected event
   families while preserving split, merge, and complex relationships.
-- Presents all cached products in Spanish or English, with Basic and Advanced
-  display modes.
+- Presents all cached products through one English interpretability-first
+  interface, with technical detail available through progressive disclosure.
 - Builds a provenance-aware scientific context and optionally generates
   bilingual scientific briefs through Gemini, Ollama, or OpenAI.
 - Applies strict structural, linguistic, numerical, claim-grounding, mandatory
@@ -108,7 +109,7 @@ Current SST, climatology, event, patch, and track calculations remain
 restricted to Niño 1+2. The planned sequence is:
 
 1. Increment 6A — Geographic foundation
-2. Increment 6B — English advanced interface
+2. Increment 6B — English interpretability-first interface
 3. Increment 6C — Multidomain SST
 4. Increment 6D — Dynamic SST refresh
 5. Increment 7A — South Pacific High
@@ -222,7 +223,7 @@ of scripts that use `argparse`. The three simple entry points
 | `patch_linking.py`, `patch_tracking.py`, `track_validation.py`, `track_metrics.py` | Pairwise patch links, continuation backbone, lineage DAGs, track/family IDs, movement, area, and severity metrics. |
 | `plotting.py`, `charting.py` | Robust fixed-domain Niño 1+2 maps and data-driven Altair/Matplotlib charts. |
 | `event_data_loader.py`, `event_dashboard.py`, `event_charts.py`, `event_maps.py`, `event_tables.py`, `event_ui_utils.py` | Failure-tolerant loading and presentation of cached event, patch, track, and family products. No tracking is recalculated in Streamlit. |
-| `i18n.py`, `help_content.py`, `sidebar_manual.py`, `interpretation_text.py` | Bilingual labels, contextual help, progressive disclosure, and deterministic neutral interpretation text. |
+| `i18n.py`, `help_content.py`, `sidebar_manual.py`, `interpretation_text.py` | English-only Streamlit guidance, progressive disclosure, deterministic neutral interpretation text, and retained bilingual label compatibility for scientific briefs. |
 | `export_utils.py` | Safe recursive JSON conversion and output helpers that reject non-standard NaN/Infinity tokens. |
 | `brief_context.py`, `brief_provenance.py`, `brief_fact_registry.py`, `brief_fact_coverage.py` | Offline context assembly, provenance, canonical facts, and mandatory operational-fact coverage planning. |
 | `brief_schema.py`, `brief_output_schema.py`, `brief_prompt_contract.py`, `brief_prompts.py`, `brief_response_parser.py` | Versioned schemas, compact provider contracts, injection-resistant prompts, and structured response parsing. |
@@ -407,13 +408,19 @@ help, and export modules. Its main tabs are:
 - **Export** — diagnosis and cached product downloads using safe JSON/CSV
   serialization.
 
-The sidebar exposes only dates available in the active SST cube, the temporal
-period, anomaly threshold, and persistence window. The persistent help panel
-selects Spanish (`es`, the default) or English (`en`) and Basic or Advanced
-view mode. Basic mode uses progressive disclosure; Advanced mode exposes all
-existing controls, technical fields, internal IDs, catalogues, and lineage
-details. Display mode changes presentation only, never calculations or data
-filters.
+The Streamlit interface is English-only and has one
+`interpretability_first` presentation mode. The sidebar exposes only dates
+available in the active SST cube plus the temporal period, anomaly threshold,
+and persistence window. Results and neutral interpretation appear first;
+supporting diagnostics, methods, internal identifiers, large catalogues, and
+lineage details remain available in clearly labelled expanders. This
+progressive disclosure changes presentation only, never calculations or data
+filters. Scientific briefs remain independently available in Spanish and
+English through the CLI (`--language es`, `--language en`, or `--language both`).
+
+The active SST calculation domain remains Niño 1+2. The Geographic Foundation
+defines overlays and future analysis domains only; multidomain SST and dynamic
+data refresh are not yet implemented.
 
 Cached Copernicus and synthetic modes are labelled explicitly. With real SST,
 the climatology priority is daily smoothed, then the explicit real monthly
@@ -432,7 +439,7 @@ remain available while anomaly-dependent products are disabled with a warning.
 | `data` | Live/demo input priority, processed paths, SST aliases, and demo seed/length. |
 | `outputs` | Core map and daily diagnosis report paths. |
 | `logging` | Application and builder log level. |
-| `interface` | Default/available languages, Basic/Advanced default, and internal-ID display. |
+| `interface` | Fixed English language, interpretability-first mode, progressive disclosure, hidden primary-view IDs, and disabled language/mode selectors. |
 | `climatology` | Primary/fallback method, 1991–2020 reference years, sampling/smoothing windows, file paths, and fallback safeguards. |
 | `quality_control` | Frequency, duplicate/gap policy, coverage and observation minima, unit handling, and report path. |
 | `series_bank` | Variables, warm-anomaly threshold, and long-format output. |
@@ -711,7 +718,8 @@ The tests cover:
   and representativeness;
 - univariate events, daily patch geometry, linking, lineage DAGs, tracks,
   families, and cached dashboard presentation;
-- bilingual labels, contextual help, interpretation text, and progressive
+- English Streamlit interface contracts, contextual help, deterministic
+  interpretation text, legacy session-state migration, and progressive
   disclosure;
 - brief-context and output schemas, provenance, mandatory fact coverage,
   disclaimer insertion, language and cross-language rules;

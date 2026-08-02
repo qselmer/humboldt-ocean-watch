@@ -30,6 +30,20 @@ def test_contextual_help_selects_only_requested_language() -> None:
     assert spanish[0].body != english[0].body
 
 
+def test_english_context_help_uses_progressive_disclosure_not_view_modes() -> None:
+    english_text = " ".join(
+        section.body
+        for tab in (
+            "Overview", "Maps", "Time series", "Spatial behaviour",
+            "Quality and representativeness", "Thermal events",
+            "Data and methods", "Export",
+        )
+        for section in get_context_help(tab, "en")
+    )
+    assert "Advanced mode" not in english_text
+    assert "Basic mode" not in english_text
+
+
 def test_representativeness_definitions_are_bilingual_and_nominal() -> None:
     assert representativeness_definition("insufficient_coverage", "es").startswith("Cobertura insuficiente")
     assert representativeness_definition("strong_coherent", "en").startswith("Strong regional signal")
