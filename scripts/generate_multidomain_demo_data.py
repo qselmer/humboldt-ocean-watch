@@ -69,6 +69,9 @@ def build_synthetic_domain_dataset(
             "scientific_representation": "mathematical demonstration only",
             "represents_current_conditions": "false",
             "domain_id": spec.domain_id,
+            "geography_id": spec.geography_id,
+            "source_mode": "demo",
+            "source_product_family": "synthetic_demo",
             "seed": int(seed),
         },
     )

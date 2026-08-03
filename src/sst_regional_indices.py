@@ -22,7 +22,11 @@ INDEX_COLUMNS = [
     "total_cell_count",
     "source_domain",
     "source_mode",
+    "climatological_mean_c",
     "anomaly_c",
+    "standardized_anomaly",
+    "threshold_p90_c",
+    "exceeds_p90",
     "anomaly_status",
     "climatology_method",
 ]
@@ -57,11 +61,12 @@ def calculate_nino_region_sst(
     source_domain: str = "pacific_context",
     source_mode: str | None = None,
     minimum_valid_coverage: float | None = None,
+    regional_climatology: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Calculate cosine-latitude-weighted daily SST means in long format.
 
-    Anomalies remain explicitly unavailable until compatible regional
-    climatologies exist; no ENSO classification is produced.
+    Anomalies are added only from a compatible regional climatology. No ONI or
+    official ENSO classification is produced.
     """
     validate_dataset(dataset)
     geography = load_geography_registry(config)
@@ -75,6 +80,31 @@ def calculate_nino_region_sst(
     if not 0.0 < minimum <= 1.0:
         raise ValueError("minimum_valid_coverage must be in (0, 1]")
     mode = source_mode or str(dataset.attrs.get("source_mode", "unknown"))
+    climate_lookup: dict[tuple[str, int], pd.Series] = {}
+    climate_error: str | None = None
+    if regional_climatology is not None and not regional_climatology.empty:
+        required_climate = {
+            "region_id",
+            "climatological_day",
+            "climatology_mean_c",
+            "climatology_std_c",
+            "threshold_p90_c",
+            "climatology_method",
+            "source_product_family",
+            "source_mode",
+        }
+        missing_climate = required_climate - set(regional_climatology.columns)
+        if missing_climate:
+            climate_error = "missing regional climatology columns: " + ", ".join(
+                sorted(missing_climate)
+            )
+        elif regional_climatology.duplicated(["region_id", "climatological_day"]).any():
+            climate_error = "regional climatology contains duplicate region/day rows"
+        else:
+            climate_lookup = {
+                (str(row.region_id), int(row.climatological_day)): row
+                for _, row in regional_climatology.iterrows()
+            }
     rows: list[dict[str, Any]] = []
     for region_id in requested:
         try:
@@ -104,9 +134,44 @@ def calculate_nino_region_sst(
                 if valid_weight > 0 and coverage >= minimum
                 else np.nan
             )
+            date = pd.Timestamp(str(time_value))
+            climatological_day = pd.Timestamp(2000, date.month, date.day).dayofyear
+            climate = climate_lookup.get((region.id, climatological_day))
+            climate_mean = np.nan
+            anomaly = np.nan
+            standardized = np.nan
+            threshold_p90 = np.nan
+            exceeds_p90: bool | None = None
+            method = "not_available"
+            anomaly_status = "not_calculated_no_compatible_climatology"
+            if climate_error is not None:
+                anomaly_status = "not_calculated_incompatible_climatology"
+            elif climate is not None:
+                climate_mode = str(climate.source_mode)
+                synthetic = climate_mode in {
+                    "demo",
+                    "synthetic",
+                    "synthetic_demonstration",
+                } or str(climate.source_product_family) == "synthetic_demo"
+                if mode in {"live", "Copernicus cached data"} and synthetic:
+                    anomaly_status = "not_calculated_incompatible_climatology"
+                elif np.isfinite(mean) and np.isfinite(climate.climatology_mean_c):
+                    climate_mean = float(climate.climatology_mean_c)
+                    anomaly = float(mean - climate_mean)
+                    method = str(climate.climatology_method)
+                    if np.isfinite(climate.climatology_std_c) and float(climate.climatology_std_c) > 0:
+                        standardized = anomaly / float(climate.climatology_std_c)
+                    if np.isfinite(climate.threshold_p90_c):
+                        threshold_p90 = float(climate.threshold_p90_c)
+                        exceeds_p90 = bool(mean > threshold_p90)
+                    anomaly_status = (
+                        "calculated"
+                        if np.isfinite(standardized) and exceeds_p90 is not None
+                        else "partial"
+                    )
             rows.append(
                 {
-                    "date": pd.Timestamp(str(time_value)),
+                    "date": date,
                     "region_id": region.id,
                     "region_label": region.label,
                     "mean_sst_c": mean,
@@ -115,9 +180,13 @@ def calculate_nino_region_sst(
                     "total_cell_count": total_cells,
                     "source_domain": source_domain,
                     "source_mode": mode,
-                    "anomaly_c": np.nan,
-                    "anomaly_status": "not_calculated_no_compatible_climatology",
-                    "climatology_method": "not_available",
+                    "climatological_mean_c": climate_mean,
+                    "anomaly_c": anomaly,
+                    "standardized_anomaly": standardized,
+                    "threshold_p90_c": threshold_p90,
+                    "exceeds_p90": exceeds_p90,
+                    "anomaly_status": anomaly_status,
+                    "climatology_method": method,
                 }
             )
     return pd.DataFrame(rows, columns=INDEX_COLUMNS).sort_values(

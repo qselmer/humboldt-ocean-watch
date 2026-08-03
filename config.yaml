@@ -78,6 +78,22 @@ geography:
 sst:
   coordinate_convention: "-180_to_180"
   active_operational_domain: nino12
+  climatology_defaults:
+    reference_start: 1991
+    reference_end: 2020
+    primary_method: daily_smoothed
+    fallback_method: monthly
+    sampling_half_window_days: 5
+    smoothing_window_days: 31
+    minimum_valid_coverage: 0.80
+    coordinate_tolerance_degrees: 1.0e-6
+    resolution_tolerance_degrees: 1.0e-6
+    standard_deviation_epsilon: 1.0e-12
+    leap_day_method: stable_366_feb29_bin60_mar01_bin61
+    allow_spatial_regridding: false
+    allow_temporal_interpolation: false
+    allow_cross_product_climatology: false
+    allow_synthetic_with_live_data: false
   domains:
     nino12:
       label: Niño 1+2 operational SST
@@ -93,7 +109,11 @@ sst:
       climatology:
         daily_path: data/climatology/nino12_daily_climatology_1991_2020.nc
         monthly_path: data/climatology/nino12_monthly_climatology_1991_2020.nc
-        status: available_or_existing
+        status: existing_operational
+        source_product_family: ostia
+        reference_period: [1991, 2020]
+        method: daily_smoothed
+        allow_monthly_fallback: true
     pacific_context:
       label: Pacific context SST
       geography_type: analysis_domain
@@ -106,7 +126,12 @@ sst:
       climatology:
         daily_path: data/climatology/sst/pacific_context_daily_1991_2020.nc
         monthly_path: data/climatology/sst/pacific_context_monthly_1991_2020.nc
-        status: not_built
+        demo_path: data/demo/climatology/pacific_context_daily_demo.nc
+        status: not_built_real
+        source_product_family: ostia
+        reference_period: [1991, 2020]
+        method: daily_smoothed
+        allow_monthly_fallback: true
     humboldt_coastal:
       label: Humboldt coastal SST
       geography_type: analysis_domain
@@ -119,12 +144,18 @@ sst:
       climatology:
         daily_path: data/climatology/sst/humboldt_coastal_daily_1991_2020.nc
         monthly_path: data/climatology/sst/humboldt_coastal_monthly_1991_2020.nc
-        status: not_built
+        demo_path: data/demo/climatology/humboldt_coastal_daily_demo.nc
+        status: not_built_real
+        source_product_family: ostia
+        reference_period: [1991, 2020]
+        method: daily_smoothed
+        allow_monthly_fallback: true
   regional_indices:
     source_domain: pacific_context
     regions: [nino34, nino3, nino12]
     minimum_valid_coverage: 0.80
     output: outputs/analytics/sst/nino_region_sst.parquet
+    climatology_output: outputs/analytics/sst/nino_region_climatology.parquet
   aggregation:
     minimum_valid_fraction: 0.80
     regular_grid_tolerance: 0.001
@@ -136,6 +167,12 @@ sst:
     processed_directory: data/processed/sst
     preview_figure: outputs/figures/multidomain_sst_preview.png
     preview_report: outputs/reports/multidomain_sst_preview.json
+  anomaly_outputs:
+    status: outputs/analytics/sst/multidomain_anomaly_status.json
+    regional_indices: outputs/analytics/sst/nino_region_sst_anomaly.parquet
+    processed_directory: data/processed/sst
+    preview_figure: outputs/figures/multidomain_sst_anomaly_preview.png
+    preview_report: outputs/reports/multidomain_sst_anomaly_preview.json
 
 data:
   live_path: data/live/nino12_sst_nrt.nc

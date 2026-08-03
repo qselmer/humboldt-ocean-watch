@@ -172,10 +172,10 @@ available `pacific_context` source grid before display aggregation, with
 cosine-latitude weighting, weighted valid coverage, and explicit cell counts.
 
 These daily source-grid SST means are not NOAA's official monthly indices and
-are not ONI. Niño 3.4 and Niño 3 anomalies remain null with status
-`not_calculated_no_compatible_climatology` until compatible spatial and
-temporal climatologies are built. No official ENSO classification or threshold
-interpretation is produced.
+are not ONI. Regional anomalies remain null with status
+`not_calculated_no_compatible_climatology` unless the separate 6C2A
+compatibility contract accepts a spatial and temporal climatology. No official
+ENSO classification or threshold interpretation is produced.
 
 Built products are local and Git-ignored:
 
@@ -189,11 +189,80 @@ outputs/figures/multidomain_sst_preview.png
 outputs/reports/multidomain_sst_preview.json
 ```
 
-Current limitations are deliberate: no complete contextual climatologies, no
-automatic or remote availability check, no atmospheric pressure or wind
-products, no ecological variables, and no multivariate integration. Increment
-6C2/6D is the planned dynamic SST refresh layer; it must preserve the same
-domain contracts and explicit offline-safe dashboard behavior.
+### Multidomain climatology and anomaly engine (Increment 6C2A)
+
+Each of `nino12`, `pacific_context`, and `humboldt_coastal` now has an immutable
+climatology specification with its own paths, geography ID, source-product
+family, method, reference metadata, resolution, coverage threshold, and
+fallback policy. The operational Niño 1+2 files remain
+`data/climatology/nino12_daily_climatology_1991_2020.nc` and
+`data/climatology/nino12_monthly_climatology_1991_2020.nc`; contextual domains
+never reuse either file.
+
+Before calculation, the compatibility layer checks domain and geography,
+source mode and product family, units, regular resolution, exact coordinates
+(latitude order may be normalized), calendar dimension, reference period,
+finite coverage, and the availability of mean, standard deviation, and P10/P90.
+It never interpolates, extrapolates, or silently regrids. A real daily smoothed
+climatology has priority; an explicitly enabled real monthly baseline is a
+labelled fallback. Monthly products are never presented as daily. Synthetic
+climatology is accepted only with synthetic demonstration SST and is rejected
+for live SST.
+
+The daily method retains the existing stable 366-bin mapping: February 29 is
+bin 60 and March 1 is bin 61 in every year. For compatible products,
+`sst_anomaly_c` is SST minus the date-matched climatology mean. `sst_z_score`
+uses the climatological standard deviation and remains NaN where that value is
+missing, non-finite, or below the configured epsilon. `below_p10` and
+`exceeds_p90` are emitted only when both percentile fields exist. All partial
+and unavailable outcomes carry explicit status rather than an invented
+baseline.
+
+The Pacific spatial climatology is also reduced with cosine-latitude weighting
+to long-format Niño 3.4, Niño 3, and Niño 1+2 climatologies using the canonical
+geography registry and the same coverage gate as regional SST. Regional output
+contains SST, climatological mean, anomaly, standardized anomaly, P90
+threshold, exceedance, coverage, and compatibility status. It does not compute
+ONI, official warm/cold categories, or an official ENSO classification.
+
+Generate the compact deterministic demonstration baselines, build the anomaly
+bundle, and render the four-panel offline preview explicitly:
+
+```powershell
+uv run python scripts\generate_multidomain_demo_climatology.py --all --overwrite
+
+uv run python scripts\build_multidomain_sst_anomalies.py `
+  --allow-demo `
+  --overwrite
+
+uv run python scripts\preview_multidomain_sst_anomalies.py `
+  --overwrite
+```
+
+Demo climatologies contain smooth synthetic 366-day fields and unequivocal
+`demonstration_only` metadata. They are not observations and do not claim that
+1991–2020 was reconstructed. Streamlit only reads the prepared status, Parquet,
+and PNG products under **Data and methods → Multidomain SST foundation →
+Multidomain climatology and anomaly status**.
+
+The new Git-ignored products are:
+
+```text
+data/processed/sst/pacific_context_latest_anomaly.nc
+data/processed/sst/humboldt_coastal_latest_anomaly.nc
+outputs/analytics/sst/nino_region_climatology.parquet
+outputs/analytics/sst/nino_region_sst_anomaly.parquet
+outputs/analytics/sst/multidomain_anomaly_status.json
+outputs/figures/multidomain_sst_anomaly_preview.png
+outputs/reports/multidomain_sst_anomaly_preview.json
+```
+
+Current limitations are deliberate: no new real contextual climatology has
+been built or downloaded, no automatic or remote availability check exists,
+and there are no atmospheric pressure, wind, ecological, or multivariate
+products. Increment 6C2B must build real contextual climatologies from an
+authorized source while preserving this contract. Increment 6D remains the
+future dynamic SST refresh layer; opening Streamlit still performs no refresh.
 
 ## System architecture
 
@@ -903,9 +972,10 @@ Do not normalize the entire repository as part of an unrelated change.
 
 ## Scientific limitations
 
-- The product is experimental and limited to SST. Detailed derived thermal
-  indicators remain operational only in Niño 1+2; contextual domains currently
-  provide SST fields and daily regional mean SST without compatible anomalies.
+- The product is experimental and limited to SST. Detailed operational thermal
+  indicators remain Niño 1+2 only. Contextual anomalies are available only for
+  explicitly compatible prepared climatologies; the shipped contextual
+  climatologies are synthetic demonstrations, not observed baselines.
 - Results depend on source-data quality, valid-area coverage, spatial
   resolution, climatology selection, sampling/smoothing windows, thresholds,
   and patch connectivity.

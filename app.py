@@ -123,6 +123,21 @@ def load_multidomain_products(
     return status, snapshot, indices, preview
 
 
+@st.cache_data(show_spinner="Loading cached multidomain anomaly products…", max_entries=3)
+def load_multidomain_anomaly_products(
+    status_path: str,
+    indices_path: str,
+    preview_path: str,
+    freshness: tuple[int, ...],
+) -> tuple[dict, pd.DataFrame, bytes]:
+    """Read only prepared anomaly products; never build, download, or write."""
+    del freshness
+    status = json.loads(Path(status_path).read_text(encoding="utf-8"))
+    indices = pd.read_parquet(indices_path)
+    preview = Path(preview_path).read_bytes()
+    return status, indices, preview
+
+
 @st.cache_resource(show_spinner="Preparing local geographic foundation…", max_entries=1)
 def load_geographic_foundation_resource():
     """Build local coastline geometry once without permitting downloads."""
@@ -920,6 +935,124 @@ with tabs[6]:
                     )
                     if multidomain_snapshot.get("warnings"):
                         st.caption("Cached warnings: " + "; ".join(multidomain_snapshot["warnings"]))
+
+            st.markdown("#### Multidomain climatology and anomaly status")
+            anomaly_outputs = config["sst"]["anomaly_outputs"]
+            anomaly_paths = {
+                "status": resolve_project_path(anomaly_outputs["status"]),
+                "indices": resolve_project_path(anomaly_outputs["regional_indices"]),
+                "preview": resolve_project_path(anomaly_outputs["preview_figure"]),
+            }
+            missing_anomaly_products = [
+                str(path) for path in anomaly_paths.values() if not path.exists()
+            ]
+            if missing_anomaly_products:
+                st.info(
+                    "Prepared multidomain climatology and anomaly products are unavailable. "
+                    "No calculation or download was attempted. Missing: "
+                    + ", ".join(missing_anomaly_products)
+                )
+                st.code(
+                    "uv run python scripts\\generate_multidomain_demo_climatology.py --all --overwrite\n\n"
+                    "uv run python scripts\\build_multidomain_sst_anomalies.py `\n"
+                    "  --allow-demo `\n"
+                    "  --overwrite\n\n"
+                    "uv run python scripts\\preview_multidomain_sst_anomalies.py `\n"
+                    "  --overwrite",
+                    language="powershell",
+                )
+            else:
+                anomaly_freshness = tuple(
+                    path.stat().st_mtime_ns for path in anomaly_paths.values()
+                )
+                try:
+                    anomaly_status, regional_anomalies, anomaly_preview = (
+                        load_multidomain_anomaly_products(
+                            str(anomaly_paths["status"]),
+                            str(anomaly_paths["indices"]),
+                            str(anomaly_paths["preview"]),
+                            anomaly_freshness,
+                        )
+                    )
+                except (OSError, ValueError, KeyError) as exc:
+                    st.warning(
+                        "Prepared anomaly products could not be read. No rebuild, write, or "
+                        f"download was attempted. Details: {exc}"
+                    )
+                else:
+                    anomaly_rows = []
+                    for domain_id, details in anomaly_status.get("domains", {}).items():
+                        compatibility = details.get("climatology", {}).get(
+                            "compatibility", {}
+                        )
+                        anomaly = details.get("anomaly", {})
+                        anomaly_rows.append(
+                            {
+                                "Domain": domain_id,
+                                "SST type": details.get("sst_mode"),
+                                "Climatology type": compatibility.get(
+                                    "climatology_mode"
+                                ),
+                                "Compatibility": compatibility.get("status"),
+                                "Method": compatibility.get("method"),
+                                "Reference period": compatibility.get(
+                                    "reference_period"
+                                ),
+                                "Resolution (°)": compatibility.get(
+                                    "climatology_resolution"
+                                ),
+                                "Coverage": compatibility.get("coverage"),
+                                "Anomaly availability": anomaly.get("status"),
+                            }
+                        )
+                    st.dataframe(
+                        pd.DataFrame(anomaly_rows),
+                        hide_index=True,
+                        width="stretch",
+                        column_config={
+                            "Coverage": st.column_config.NumberColumn(
+                                "Coverage", format="percent"
+                            )
+                        },
+                    )
+                    st.image(
+                        anomaly_preview,
+                        caption=(
+                            "Prepared offline anomaly preview — synthetic demonstration "
+                            "products are not observations."
+                        ),
+                        width="stretch",
+                    )
+                    anomaly_display_columns = [
+                        "date",
+                        "region_label",
+                        "mean_sst_c",
+                        "climatological_mean_c",
+                        "anomaly_c",
+                        "standardized_anomaly",
+                        "threshold_p90_c",
+                        "exceeds_p90",
+                        "valid_coverage",
+                        "anomaly_status",
+                    ]
+                    st.dataframe(
+                        regional_anomalies.loc[
+                            :,
+                            [
+                                column
+                                for column in anomaly_display_columns
+                                if column in regional_anomalies
+                            ],
+                        ],
+                        hide_index=True,
+                        width="stretch",
+                    )
+                    for warning in anomaly_status.get("warnings", []):
+                        st.warning(str(warning), icon=":material/info:")
+            st.caption(
+                "Demo products are not observations. The active detailed operational "
+                "pipeline remains Niño 1+2. No official ENSO classification or ONI is produced."
+            )
 
     with st.expander("Quality control", expanded=False):
         if qc_report:

@@ -183,8 +183,14 @@ def load_sst_domain_dataset(
     description = describe_sst_dataset(subset)
     subset.attrs.update(
         domain_id=str(domain_spec.domain_id),
+        geography_id=str(domain_spec.geography_id),
         source_path=str(source),
         source_mode=source_mode,
+        source_product_family=(
+            "synthetic_demo"
+            if source_mode == "demo"
+            else str(dataset.attrs.get("source_product_family", "ostia"))
+        ),
         requested_longitude_bounds=",".join(map(str, longitude_bounds)),
         requested_latitude_bounds=",".join(map(str, latitude_bounds)),
         effective_longitude_bounds=",".join(map(str, description["longitude_bounds"])),
