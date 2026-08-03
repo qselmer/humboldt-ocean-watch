@@ -138,6 +138,15 @@ def load_multidomain_anomaly_products(
     return status, indices, preview
 
 
+@st.cache_data(show_spinner=False, max_entries=3)
+def load_real_climatology_build_status(
+    status_path: str, freshness: int
+) -> dict:
+    """Read one prepared status JSON; never preflight, build, download, or write."""
+    del freshness
+    return json.loads(Path(status_path).read_text(encoding="utf-8"))
+
+
 @st.cache_resource(show_spinner="Preparing local geographic foundation…", max_entries=1)
 def load_geographic_foundation_resource():
     """Build local coastline geometry once without permitting downloads."""
@@ -937,6 +946,65 @@ with tabs[6]:
                         st.caption("Cached warnings: " + "; ".join(multidomain_snapshot["warnings"]))
 
             st.markdown("#### Multidomain climatology and anomaly status")
+            st.markdown("##### Real climatology build status")
+            real_build = config["real_climatology_build"]
+            real_status_path = resolve_project_path(real_build["build_status_report"])
+            if not real_status_path.exists():
+                st.info(
+                    "The prepared real-climatology build report is unavailable. "
+                    "No preflight, download, calculation, or write was attempted by Streamlit."
+                )
+                st.code(
+                    "uv run python scripts\\check_real_sst_climatology_source.py --all\n\n"
+                    "uv run python scripts\\plan_real_multidomain_climatology.py `\n"
+                    "  --all `\n"
+                    "  --start-year 1991 `\n"
+                    "  --end-year 2020\n\n"
+                    "uv run python scripts\\build_real_multidomain_climatology.py `\n"
+                    "  --all `\n"
+                    "  --start-year 1991 `\n"
+                    "  --end-year 2020 `\n"
+                    "  --dry-run",
+                    language="powershell",
+                )
+            else:
+                try:
+                    real_status = load_real_climatology_build_status(
+                        str(real_status_path), real_status_path.stat().st_mtime_ns
+                    )
+                except (OSError, ValueError, KeyError) as exc:
+                    st.warning(
+                        "The prepared real-climatology build report could not be read. "
+                        f"No action was attempted. Details: {exc}"
+                    )
+                else:
+                    resource_estimates = [
+                        details.get("estimated_peak_memory_bytes")
+                        for details in real_status.get("domains", {}).values()
+                        if details.get("estimated_peak_memory_bytes") is not None
+                    ]
+                    status_rows = [
+                        {"Item": "Source preflight", "Status": real_status.get("source_preflight", "valid before execution")},
+                        {"Item": "Product ID", "Status": real_status.get("dataset_id")},
+                        {"Item": "Reference period planned", "Status": str(real_status.get("reference_period_planned", [1991, 2020]))},
+                        {"Item": "Build status", "Status": real_status.get("build_status", "not executed")},
+                        {"Item": "Pilot status", "Status": real_status.get("pilot_status", "not executed")},
+                        {"Item": "Peak memory estimate", "Status": (
+                            "Unavailable" if not resource_estimates else f"{max(resource_estimates) / 1024**3:.2f} GiB"
+                        )},
+                        {"Item": "Full build executed", "Status": str(bool(real_status.get("full_build_executed", False)))},
+                        {"Item": "Final climatologies available", "Status": str(bool(real_status.get("final_climatologies_available", False)))},
+                        {"Item": "Last validation", "Status": real_status.get("last_validation", "Unavailable")},
+                    ]
+                    st.dataframe(pd.DataFrame(status_rows), hide_index=True)
+                    for warning in real_status.get("warnings", []):
+                        st.warning(str(warning), icon=":material/info:")
+                    if real_status.get("pilot_build"):
+                        st.warning(
+                            "The 1991–1992 pilot validates the pipeline only. It is not a "
+                            "1991–2020 climatology and is never used as an operational fallback.",
+                            icon=":material/science:",
+                        )
             anomaly_outputs = config["sst"]["anomaly_outputs"]
             anomaly_paths = {
                 "status": resolve_project_path(anomaly_outputs["status"]),

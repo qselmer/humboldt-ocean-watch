@@ -414,7 +414,7 @@ the primary workflow.
 Windows PowerShell:
 
 ```powershell
-cd D:\.apps\humboldt-ocean-watch
+cd <repository-root>
 python -m venv .venv
 uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 ```
@@ -969,6 +969,100 @@ scientific error.
 
 Use the repository's Git settings consistently and inspect `git diff --check`.
 Do not normalize the entire repository as part of an unrelated change.
+
+## Real multidomain climatology production builder (Increment 6C2B1)
+
+Increment 6C2B1 prepares, but does not execute, the complete observed
+1991–2020 multidomain climatology. It uses the OSTIA reprocessed dataset
+`METOFFICE-GLO-SST-L4-REP-OBS-SST` and `analysed_sst`. Reprocessed (REP) data
+provide the fixed historical reference; the operational near-real-time (NRT)
+product remains a separate live-data source and is rejected by this builder.
+
+The planned domains are Pacific context (`170°W–70°W`, `45°S–10°N`) at a
+0.25° target grid and Humboldt coastal (`85°W–70°W`, `45°S–2°N`) at the native
+0.05° grid. Pacific daily fields are aggregated without interpolation using
+cosine-latitude-weighted 0.05°→0.25° blocks and a valid-coverage gate. Humboldt
+preserves 0.05° and is not cropped to the 60 nautical-mile corridor; that
+mainland-only, island-excluding corridor remains a later analytical mask.
+
+Production is spatially tiled (30,000 target cells maximum after pilot
+recalibration) and resumable by tile-year. Every reusable
+NetCDF checkpoint has provenance, a deterministic contract fingerprint, and a
+SHA-256 sidecar. Writes use temporary files, validation, and atomic replacement.
+Invalid, corrupt, wrong-year, wrong-tile, wrong-resolution, or mixed-version
+checkpoints are not reused. The planner reports cumulative transfer volume,
+simultaneous checkpoint/temporary storage, final-product size, peak-memory
+estimate, tile count, and separate final/pilot/resume paths before network use.
+The memory model includes a 3.5 GiB exact-quantile graph overhead measured by
+the controlled pilot. Configured limits are 80 GiB estimated disk and 8 GiB estimated peak memory;
+exceeding either produces `resource_limit_exceeded` and starts no download.
+
+Within each approved tile, the scientific method is unchanged: stable 366-day
+calendar (February 29 is bin 60 and March 1 is bin 61), ±5-day sampling,
+31-day circular smoothing, mean, unsmoothed median, population standard
+deviation, exact P10/P90, and observation count. The full time dimension is
+combined only inside one bounded tile. Exact quantiles are never silently
+approximated; a memory conflict requires smaller spatial tiles.
+
+Fine-grid daily weighted intermediates support experimental Niño 3.4, Niño 3,
+and Niño 1+2 regional climatologies before the source grid is discarded. Bounds
+come from the geography registry. These are OSTIA SST diagnostics, not NOAA
+indices: the pipeline does not calculate ONI, official rolling seasons, ENSO
+classification, or official El Niño intensity.
+
+The preflight uses Copernicus Marine Toolbox `describe` for catalogue metadata,
+then a one-cell/one-day `open_dataset` probe to validate authentication. Actual
+controlled files use `subset`. Authentication stays inside the Toolbox: scripts
+do not read or display `.env`, `.netrc`, tokens, passwords, cookies, private
+credential files, or authentication headers. Errors are sanitized.
+
+Run the offline contract check, then online preflight, plan, and dry-run:
+
+```powershell
+uv run python scripts\check_real_sst_climatology_source.py --all --offline
+uv run python scripts\check_real_sst_climatology_source.py --all
+uv run python scripts\plan_real_multidomain_climatology.py `
+  --all `
+  --start-year 1991 `
+  --end-year 2020
+uv run python scripts\build_real_multidomain_climatology.py `
+  --all `
+  --start-year 1991 `
+  --end-year 2020 `
+  --dry-run
+```
+
+Only after a valid authenticated preflight and accepted resource plan, run the
+controlled 1991–1992 pilot (at most one deliberately small tile per domain):
+
+```powershell
+uv run python scripts\build_real_multidomain_climatology.py `
+  --all `
+  --pilot `
+  --execute `
+  --resume
+uv run python scripts\validate_real_multidomain_climatology.py --pilot --all
+uv run python scripts\preview_real_multidomain_climatology.py --pilot --overwrite
+```
+
+Pilot data and reports are Git-ignored, use only pilot paths, carry
+`scientific_use: pipeline_validation_only`, and never replace or fall back for
+operational climatologies. Streamlit reads a prepared status JSON only; it does
+not preflight, download, build, calculate, write, or activate pilot data.
+
+The complete 30-year build has not been executed in 6C2B1. After human review
+of the remote product, pilot, storage, time, memory, and scientific validation,
+the exact proposed 6C2B2 command is:
+
+```powershell
+uv run python scripts\build_real_multidomain_climatology.py `
+  --all `
+  --start-year 1991 `
+  --end-year 2020 `
+  --execute `
+  --confirm-full-build `
+  --resume
+```
 
 ## Scientific limitations
 

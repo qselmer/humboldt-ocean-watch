@@ -174,6 +174,47 @@ sst:
     preview_figure: outputs/figures/multidomain_sst_anomaly_preview.png
     preview_report: outputs/reports/multidomain_sst_anomaly_preview.json
 
+# Increment 6C2B1 production builder. These controls are deliberately separate
+# from the operational Nino 1+2 climatology contract above.
+real_climatology_build:
+  dataset_id: METOFFICE-GLO-SST-L4-REP-OBS-SST
+  source_variable: analysed_sst
+  source_product_family: ostia
+  source_resolution_degrees: 0.05
+  start_year: 1991
+  end_year: 2020
+  download_strategy: yearly_spatial_tile
+  checkpoint_format: netcdf
+  final_format: netcdf
+  compression_level: 4
+  tile_target_cells: 30000
+  exact_quantile_graph_overhead_gb: 3.5
+  minimum_valid_coverage: 0.80
+  maximum_estimated_disk_gb: 80
+  maximum_estimated_memory_gb: 8
+  require_explicit_execute: true
+  require_full_build_confirmation: true
+  retain_yearly_checkpoints: true
+  delete_checkpoints_after_success: false
+  network_timeout_seconds: 600
+  maximum_download_attempts: 3
+  retry_initial_seconds: 5
+  preflight_report: outputs/reports/sst_climatology_source_preflight.json
+  plan_report: outputs/reports/real_climatology_build_plan.json
+  build_status_report: outputs/reports/real_climatology_build_status.json
+  pilot_report: outputs/reports/real_climatology_pilot_report.json
+  pilot_preview: outputs/figures/real_climatology_pilot_preview.png
+  work_directory: data/climatology/work
+  pilot_work_directory: data/climatology/pilot/work
+  regional_output: outputs/analytics/sst/nino_region_climatology.parquet
+  pilot_regional_output: outputs/analytics/sst/pilot/nino_region_climatology_1991_1992_pilot.parquet
+  pilot:
+    start_year: 1991
+    end_year: 1992
+    maximum_tiles: 1
+    tile_target_cells: 2500
+    publish_to_final_paths: false
+
 data:
   live_path: data/live/nino12_sst_nrt.nc
   demo_path: data/demo/synthetic_sst_daily.nc

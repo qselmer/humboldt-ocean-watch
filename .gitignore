@@ -19,6 +19,10 @@ data/demo/climatology/*.nc
 data/processed/*
 data/climatology/checkpoints_*/
 data/climatology/*.nc
+data/climatology/work/
+data/climatology/pilot/
+data/climatology/sst/*.nc
+data/climatology/sst/*.sha256
 outputs/figures/*
 outputs/reports/*
 outputs/analytics/*
